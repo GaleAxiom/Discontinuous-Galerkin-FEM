@@ -14,20 +14,20 @@ jobs:
     runs-on: ubuntu-latest
     # Uncomment once Docker image is published (after first push)
     # container:
-    image: ghcr.io/galeaxiom/discontinuous-galerkin-fem:latest
+    #   image: ghcr.io/galeaxiom/discontinuous-galerkin-fem:latest
 
     steps:
     - uses: actions/checkout@v4
 
-    # - name: Install dependencies
-    #   run: |
-    #     sudo apt-get update
-    #     sudo apt-get install -y gmsh libgmsh-dev libeigen3-dev libgtest-dev libgmock-dev
-    #     # Build and install Google Test
-    #     cd /tmp
-    #     sudo cmake /usr/src/googletest
-    #     sudo make
-    #     sudo cp lib/*.a /usr/lib/ 2>/dev/null || sudo cp ./*.a /usr/lib/ 2>/dev/null || sudo find . -name "*.a" -exec cp {} /usr/lib/ \;
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gmsh libgmsh-dev libeigen3-dev libgtest-dev libgmock-dev
+        # Build and install Google Test
+        cd /tmp
+        sudo cmake /usr/src/googletest
+        sudo make
+        sudo cp lib/*.a /usr/lib/ 2>/dev/null || sudo cp ./*.a /usr/lib/ 2>/dev/null || sudo find . -name "*.a" -exec cp {} /usr/lib/ \;
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory
