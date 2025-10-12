@@ -42,32 +42,53 @@ std::shared_ptr<DGMesh> MeshCreator::create_rectangular_mesh(
 std::shared_ptr<DGMesh> MeshCreator::create_euler_mesh(
     double xmin, double xmax, double ymin, double ymax, double dx, bool use_triangles) {
     
+    std::cout << "DEBUG [create_euler_mesh]: Entry - domain=[" << xmin << "," << xmax 
+              << "] x [" << ymin << "," << ymax << "], dx=" << dx 
+              << ", use_triangles=" << use_triangles << std::endl;
+    
     // Create new model
+    std::cout << "DEBUG [create_euler_mesh]: Adding GMSH model 'euler_mesh'" << std::endl;
     gmsh::model::add("euler_mesh");
     
     // Setup geometry
+    std::cout << "DEBUG [create_euler_mesh]: Setting up rectangular geometry" << std::endl;
     setup_rectangular_geometry(xmin, xmax, ymin, ymax, dx);
     
     // Configure mesh generation
+    std::cout << "DEBUG [create_euler_mesh]: Configuring mesh generation" << std::endl;
     configure_mesh_generation(use_triangles);
     
     // Generate mesh
+    std::cout << "DEBUG [create_euler_mesh]: Generating 2D mesh..." << std::endl;
     gmsh::model::mesh::generate(2);
+    std::cout << "DEBUG [create_euler_mesh]: Mesh generation completed" << std::endl;
     
     // Create DGMesh from current model
-    return create_dg_mesh_from_gmsh();
+    std::cout << "DEBUG [create_euler_mesh]: Creating DGMesh from GMSH model" << std::endl;
+    auto result = create_dg_mesh_from_gmsh();
+    std::cout << "DEBUG [create_euler_mesh]: DGMesh created, returning" << std::endl;
+    return result;
 }
 
 std::shared_ptr<DGMesh> MeshCreator::create_dg_mesh_from_gmsh() {
+    std::cout << "DEBUG [create_dg_mesh_from_gmsh]: Entry" << std::endl;
+    
     Eigen::MatrixXd vertices;
     Eigen::MatrixXi elements;
     Eigen::VectorXi element_tags;
     std::map<std::string, int> boundary_tags;
     std::map<int, std::vector<std::pair<int, int>>> boundary_edges;
     
+    std::cout << "DEBUG [create_dg_mesh_from_gmsh]: Extracting mesh data from GMSH" << std::endl;
     extract_mesh_data(vertices, elements, element_tags, boundary_tags, boundary_edges);
     
-    return std::make_shared<DGMesh>(vertices, elements, element_tags, boundary_tags, boundary_edges);
+    std::cout << "DEBUG [create_dg_mesh_from_gmsh]: Creating DGMesh object - vertices: " 
+              << vertices.rows() << "x" << vertices.cols() 
+              << ", elements: " << elements.rows() << "x" << elements.cols() << std::endl;
+    
+    auto mesh = std::make_shared<DGMesh>(vertices, elements, element_tags, boundary_tags, boundary_edges);
+    std::cout << "DEBUG [create_dg_mesh_from_gmsh]: DGMesh object created successfully" << std::endl;
+    return mesh;
 }
 
 void MeshCreator::setup_rectangular_geometry(
@@ -125,47 +146,62 @@ void MeshCreator::extract_mesh_data(
     std::map<std::string, int>& boundary_tags,
     std::map<int, std::vector<std::pair<int, int>>>& boundary_edges) {
     
+    std::cout << "DEBUG [extract_mesh_data]: Entry" << std::endl;
+    
     // Get nodes
     std::vector<std::size_t> node_tags;
     std::vector<double> coords;
     std::vector<double> parametric_coords;
     
+    std::cout << "DEBUG [extract_mesh_data]: Getting nodes from GMSH" << std::endl;
     gmsh::model::mesh::getNodes(node_tags, coords, parametric_coords);
+    std::cout << "DEBUG [extract_mesh_data]: Retrieved " << node_tags.size() << " nodes" << std::endl;
     
     // Convert nodes to Eigen format
     int n_nodes = node_tags.size();
     vertices.resize(n_nodes, 2);
     std::map<std::size_t, int> node_map;
     
+    std::cout << "DEBUG [extract_mesh_data]: Converting nodes to Eigen format" << std::endl;
     for (int i = 0; i < n_nodes; ++i) {
         node_map[node_tags[i]] = i;
         vertices(i, 0) = coords[3*i];
         vertices(i, 1) = coords[3*i + 1];
     }
+    std::cout << "DEBUG [extract_mesh_data]: Node conversion complete" << std::endl;
     
     // Get 2D elements
     std::vector<int> elem_types;
     std::vector<std::vector<std::size_t>> elem_tags_vec;
     std::vector<std::vector<std::size_t>> node_tags_vec;
     
+    std::cout << "DEBUG [extract_mesh_data]: Getting 2D elements from GMSH" << std::endl;
     gmsh::model::mesh::getElements(elem_types, elem_tags_vec, node_tags_vec, 2);
+    std::cout << "DEBUG [extract_mesh_data]: Retrieved " << elem_types.size() << " element types" << std::endl;
     
     if (elem_types.empty()) {
+        std::cerr << "ERROR [extract_mesh_data]: No 2D elements found in GMSH model" << std::endl;
         throw std::runtime_error("No 2D elements found in GMSH model");
     }
     
     int elem_type = elem_types[0];
+    std::cout << "DEBUG [extract_mesh_data]: Element type = " << elem_type << std::endl;
     int n_nodes_per_elem = (elem_type == 2) ? 3 : (elem_type == 3) ? 4 : 0;
+    std::cout << "DEBUG [extract_mesh_data]: Nodes per element = " << n_nodes_per_elem << std::endl;
     
     if (n_nodes_per_elem == 0) {
+        std::cerr << "ERROR [extract_mesh_data]: Unsupported element type: " << elem_type << std::endl;
         throw std::runtime_error("Unsupported element type: " + std::to_string(elem_type));
     }
     
     // Convert elements to Eigen format
     int n_elements = elem_tags_vec[0].size();
+    std::cout << "DEBUG [extract_mesh_data]: Number of elements = " << n_elements << std::endl;
+    std::cout << "DEBUG [extract_mesh_data]: Resizing elements matrix to " << n_elements << "x" << n_nodes_per_elem << std::endl;
     elements.resize(n_elements, n_nodes_per_elem);
     element_tags.resize(n_elements);
     
+    std::cout << "DEBUG [extract_mesh_data]: Converting elements to Eigen format" << std::endl;
     for (int i = 0; i < n_elements; ++i) {
         element_tags[i] = elem_tags_vec[0][i];
         for (int j = 0; j < n_nodes_per_elem; ++j) {
@@ -173,22 +209,29 @@ void MeshCreator::extract_mesh_data(
             elements(i, j) = node_map[global_node];
         }
     }
+    std::cout << "DEBUG [extract_mesh_data]: Element conversion complete" << std::endl;
     
     // Get physical groups for boundary identification
     std::vector<std::pair<int, int>> physical_groups;
+    std::cout << "DEBUG [extract_mesh_data]: Getting physical groups" << std::endl;
     gmsh::model::getPhysicalGroups(physical_groups);
+    std::cout << "DEBUG [extract_mesh_data]: Found " << physical_groups.size() << " physical groups" << std::endl;
     
     for (auto& pg : physical_groups) {
         int dim = pg.first;
         int tag = pg.second;
         
+        std::cout << "DEBUG [extract_mesh_data]: Processing physical group - dim=" << dim << ", tag=" << tag << std::endl;
+        
         if (dim == 1) {  // Boundary physical groups
             std::string name;
             gmsh::model::getPhysicalName(dim, tag, name);
+            std::cout << "DEBUG [extract_mesh_data]: Boundary group name = '" << name << "'" << std::endl;
             boundary_tags[name] = tag;
 
             std::vector<int> entities;
             gmsh::model::getEntitiesForPhysicalGroup(dim, tag, entities);
+            std::cout << "DEBUG [extract_mesh_data]: Found " << entities.size() << " entities for this group" << std::endl;
 
             for (int entity : entities) {
                 std::vector<int> edge_types;
@@ -198,6 +241,7 @@ void MeshCreator::extract_mesh_data(
 
                 if (!edge_types.empty()) {
                     const auto& edge_node_tags = edge_node_tags_vec[0];
+                    std::cout << "DEBUG [extract_mesh_data]: Processing " << edge_node_tags.size()/2 << " edges for entity " << entity << std::endl;
                     for (size_t i = 0; i < edge_node_tags.size() / 2; ++i) {
                         int v1 = node_map.at(edge_node_tags[2 * i]);
                         int v2 = node_map.at(edge_node_tags[2 * i + 1]);
@@ -208,6 +252,8 @@ void MeshCreator::extract_mesh_data(
         }
     }
     
+    std::cout << "DEBUG [extract_mesh_data]: Boundary processing complete" << std::endl;
+    
     // Print mesh statistics
     std::cout << "Generated mesh with " << n_nodes << " nodes and " << n_elements << " elements." << std::endl;
     if (elem_type == 2) {
@@ -215,6 +261,7 @@ void MeshCreator::extract_mesh_data(
     } else if (elem_type == 3) {
         std::cout << "Element type: 4-node quadrilaterals" << std::endl;
     }
+    std::cout << "DEBUG [extract_mesh_data]: Exit" << std::endl;
 }
 
 std::optional<Eigen::Vector2d> find_reference_coords(

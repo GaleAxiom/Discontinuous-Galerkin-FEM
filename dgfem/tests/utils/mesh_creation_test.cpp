@@ -46,52 +46,83 @@ TEST_F(MeshCreationFixture, CreateRectangularMeshTriangles) {
 }
 
 TEST_F(MeshCreationFixture, CreateRectangularMeshQuads) {
+    std::cout << "DEBUG: Starting CreateRectangularMeshQuads test" << std::endl;
+    std::cout << "DEBUG: About to call create_rectangular_mesh with dx=0.5, use_triangles=false" << std::endl;
+    
     // Test quad mesh with default domain [0,1]^2
     auto mesh_quad = MeshCreator::create_rectangular_mesh(0.5, false);
     
+    std::cout << "DEBUG: create_rectangular_mesh returned, mesh pointer = " << mesh_quad.get() << std::endl;
     ASSERT_NE(mesh_quad, nullptr) << "Mesh should not be null";
     
+    std::cout << "DEBUG: Getting number of elements..." << std::endl;
+    int n_elements = mesh_quad->get_n_elements();
+    std::cout << "DEBUG: Number of elements = " << n_elements << std::endl;
+    
     // Verify mesh has elements
-    EXPECT_GT(mesh_quad->get_n_elements(), 0) << "Should have at least one quad element";
+    EXPECT_GT(n_elements, 0) << "Should have at least one quad element";
     
+    std::cout << "DEBUG: Getting vertices..." << std::endl;
     // Verify mesh has vertices  
-    EXPECT_GT(mesh_quad->get_vertices().rows(), 0) << "Should have vertices";
-    EXPECT_EQ(mesh_quad->get_vertices().cols(), 2) << "Vertices should be 2D";
+    const auto& vertices = mesh_quad->get_vertices();
+    std::cout << "DEBUG: Vertices size = " << vertices.rows() << " x " << vertices.cols() << std::endl;
+    EXPECT_GT(vertices.rows(), 0) << "Should have vertices";
+    EXPECT_EQ(vertices.cols(), 2) << "Vertices should be 2D";
     
+    std::cout << "DEBUG: Getting boundary faces..." << std::endl;
     // Verify boundary faces exist
-    EXPECT_GT(mesh_quad->get_boundary_faces().size(), 0) << "Should have boundary faces";
+    const auto& boundary_faces = mesh_quad->get_boundary_faces();
+    std::cout << "DEBUG: Number of boundary faces = " << boundary_faces.size() << std::endl;
+    EXPECT_GT(boundary_faces.size(), 0) << "Should have boundary faces";
     
     // For a unit square with dx=0.5, expect 4 quads (2x2 grid)
-    EXPECT_GE(mesh_quad->get_n_elements(), 4) << "Should have at least 4 quads";
-    EXPECT_LE(mesh_quad->get_n_elements(), 16) << "Too many quads for given mesh size";
+    EXPECT_GE(n_elements, 4) << "Should have at least 4 quads";
+    EXPECT_LE(n_elements, 16) << "Too many quads for given mesh size";
     
+    std::cout << "DEBUG: Getting element matrix..." << std::endl;
     // Verify quad elements have 4 vertices each
-    EXPECT_EQ(mesh_quad->get_elements().cols(), 4) << "Quad elements should have 4 vertices";
+    const auto& elements = mesh_quad->get_elements();
+    std::cout << "DEBUG: Elements size = " << elements.rows() << " x " << elements.cols() << std::endl;
+    EXPECT_EQ(elements.cols(), 4) << "Quad elements should have 4 vertices";
     
     // Verify boundary - unit square should have 4 boundary edges (one per side)
     // With 4 quads in a 2x2 grid, there should be 8 boundary faces total (2 per side)
-    EXPECT_EQ(mesh_quad->get_boundary_faces().size(), 8) << "Unit square with 2x2 quads should have 8 boundary faces";
+    EXPECT_EQ(boundary_faces.size(), 8) << "Unit square with 2x2 quads should have 8 boundary faces";
+    std::cout << "DEBUG: CreateRectangularMeshQuads test completed successfully" << std::endl;
 }
 
 TEST_F(MeshCreationFixture, CreateEulerMesh) {
+    std::cout << "DEBUG: Starting CreateEulerMesh test" << std::endl;
+    std::cout << "DEBUG: About to call create_euler_mesh with params: xmin=-5, xmax=5, ymin=-5, ymax=5, dx=0.2, use_triangles=false" << std::endl;
+    
     // Test with default parameters: domain [-5,5]^2 with dx=0.2
     auto mesh = MeshCreator::create_euler_mesh(-5, 5, -5, 5, 0.2, false);
     
+    std::cout << "DEBUG: create_euler_mesh returned, mesh pointer = " << mesh.get() << std::endl;
     ASSERT_NE(mesh, nullptr) << "Euler mesh should not be null";
-    EXPECT_GT(mesh->get_n_elements(), 0) << "Should have elements";
+    
+    std::cout << "DEBUG: Getting number of elements..." << std::endl;
+    int n_elements = mesh->get_n_elements();
+    std::cout << "DEBUG: Number of elements = " << n_elements << std::endl;
+    EXPECT_GT(n_elements, 0) << "Should have elements";
     
     // Domain is 10x10, with dx=0.2, expect roughly 50x50 = 2500 quads
-    EXPECT_GE(mesh->get_n_elements(), 2000) << "Should have roughly 2500 quads for 10x10 domain with dx=0.2";
-    EXPECT_LE(mesh->get_n_elements(), 3000) << "Shouldn't have too many quads";
+    EXPECT_GE(n_elements, 2000) << "Should have roughly 2500 quads for 10x10 domain with dx=0.2";
+    EXPECT_LE(n_elements, 3000) << "Shouldn't have too many quads";
     
+    std::cout << "DEBUG: Getting vertices..." << std::endl;
     // Verify vertices are within domain
     const auto& vertices = mesh->get_vertices();
+    std::cout << "DEBUG: Vertices size = " << vertices.rows() << " x " << vertices.cols() << std::endl;
+    std::cout << "DEBUG: Checking vertex bounds..." << std::endl;
+    
     for (int i = 0; i < vertices.rows(); ++i) {
-        EXPECT_GE(vertices(i, 0), -5.0 - 0.3) << "X coordinate should be >= -5";
-        EXPECT_LE(vertices(i, 0), 5.0 + 0.3) << "X coordinate should be <= 5";
-        EXPECT_GE(vertices(i, 1), -5.0 - 0.3) << "Y coordinate should be >= -5";
-        EXPECT_LE(vertices(i, 1), 5.0 + 0.3) << "Y coordinate should be <= 5";
+        EXPECT_GE(vertices(i, 0), -5.0 - 0.3) << "X coordinate should be >= -5 at vertex " << i;
+        EXPECT_LE(vertices(i, 0), 5.0 + 0.3) << "X coordinate should be <= 5 at vertex " << i;
+        EXPECT_GE(vertices(i, 1), -5.0 - 0.3) << "Y coordinate should be >= -5 at vertex " << i;
+        EXPECT_LE(vertices(i, 1), 5.0 + 0.3) << "Y coordinate should be <= 5 at vertex " << i;
     }
+    std::cout << "DEBUG: CreateEulerMesh test completed successfully" << std::endl;
 }
 
 TEST_F(MeshCreationFixture, CreateCustomDomainMesh) {

@@ -22,8 +22,14 @@ DGMesh::DGMesh(const Eigen::MatrixXd& vertices,
       element_tags_(element_tags), boundary_tags_(boundary_tags),
       n_elements_(elements.rows()) {
     
+    std::cout << "DEBUG [DGMesh::DGMesh]: Constructor entry - vertices: " 
+              << vertices.rows() << "x" << vertices.cols() 
+              << ", elements: " << elements.rows() << "x" << elements.cols() << std::endl;
+    
     // Determine element type
     int n_nodes_per_elem = elements.cols();
+    std::cout << "DEBUG [DGMesh::DGMesh]: Nodes per element = " << n_nodes_per_elem << std::endl;
+    
     if (n_nodes_per_elem == 3) {
         element_type_ = "triangle";
         n_faces_per_elem_ = 3;
@@ -31,24 +37,34 @@ DGMesh::DGMesh(const Eigen::MatrixXd& vertices,
         element_type_ = "quad";
         n_faces_per_elem_ = 4;
     } else {
+        std::cerr << "ERROR [DGMesh::DGMesh]: Unknown element type with " << n_nodes_per_elem << " vertices" << std::endl;
         throw std::invalid_argument("Unknown element type with " + 
                                   std::to_string(n_nodes_per_elem) + " vertices");
     }
+    std::cout << "DEBUG [DGMesh::DGMesh]: Element type = " << element_type_ << ", faces per element = " << n_faces_per_elem_ << std::endl;
     
     // Build connectivity
+    std::cout << "DEBUG [DGMesh::DGMesh]: Building face connectivity..." << std::endl;
     build_face_connectivity();
+    std::cout << "DEBUG [DGMesh::DGMesh]: Face connectivity built" << std::endl;
+    
+    std::cout << "DEBUG [DGMesh::DGMesh]: Identifying boundary faces..." << std::endl;
     identify_boundary_faces(boundary_edges);
+    std::cout << "DEBUG [DGMesh::DGMesh]: Boundary faces identified, count = " << boundary_faces_.size() << std::endl;
 
     // Build node-to-element mapping
+    std::cout << "DEBUG [DGMesh::DGMesh]: Building node-to-element mapping..." << std::endl;
     for (int i = 0; i < n_elements_; ++i) {
         for (int j = 0; j < elements_.cols(); ++j) {
             int global_node_idx = elements_(i, j);
             node_to_elements_[global_node_idx].push_back({i, j});
         }
     }
+    std::cout << "DEBUG [DGMesh::DGMesh]: Node-to-element mapping built" << std::endl;
     
     std::cout << "Created DGMesh with " << n_elements_ << " " << element_type_ 
               << " elements and " << boundary_faces_.size() << " boundary faces" << std::endl;
+    std::cout << "DEBUG [DGMesh::DGMesh]: Constructor exit" << std::endl;
 }
 
 void DGMesh::initialize_dg_space(std::shared_ptr<DGSpace> dg_space, int n_variables) {
@@ -273,12 +289,22 @@ bool DGMesh::is_boundary_face(int elem_id, int face_id) const noexcept {
 }
 
 void DGMesh::build_face_connectivity() {
+    std::cout << "DEBUG [build_face_connectivity]: Entry - n_elements=" << n_elements_ 
+              << ", n_faces_per_elem=" << n_faces_per_elem_ << std::endl;
+    
+    std::cout << "DEBUG [build_face_connectivity]: Initializing face_neighbors matrix to " 
+              << n_elements_ << "x" << (n_faces_per_elem_ * 2) << std::endl;
     face_neighbors_ = Eigen::MatrixXi::Constant(n_elements_, n_faces_per_elem_ * 2, -1);
+    std::cout << "DEBUG [build_face_connectivity]: face_neighbors matrix initialized" << std::endl;
     
     std::map<std::pair<int, int>, std::vector<std::pair<int, int>>> face_map;
     
+    std::cout << "DEBUG [build_face_connectivity]: Building face signature map..." << std::endl;
     // Build face signature map
     for (int elem_id = 0; elem_id < n_elements_; ++elem_id) {
+        if (elem_id % 500 == 0) {
+            std::cout << "DEBUG [build_face_connectivity]: Processing element " << elem_id << "/" << n_elements_ << std::endl;
+        }
         for (int face_id = 0; face_id < n_faces_per_elem_; ++face_id) {
             // Get face vertices
             int v1, v2;
@@ -296,12 +322,16 @@ void DGMesh::build_face_connectivity() {
             face_to_vertices_[{elem_id, face_id}] = {v1, v2};
         }
     }
+    std::cout << "DEBUG [build_face_connectivity]: Face signature map built, unique faces = " << face_map.size() << std::endl;
     
+    std::cout << "DEBUG [build_face_connectivity]: Setting up connectivity..." << std::endl;
     // Set up connectivity
+    int interior_faces = 0;
     for (const auto& entry : face_map) {
         const auto& face_list = entry.second;
         if (face_list.size() == 2) {
             // Interior face
+            interior_faces++;
             int elem1 = face_list[0].first, face1 = face_list[0].second;
             int elem2 = face_list[1].first, face2 = face_list[1].second;
             
@@ -312,25 +342,37 @@ void DGMesh::build_face_connectivity() {
         }
         // Boundary faces remain -1
     }
+    std::cout << "DEBUG [build_face_connectivity]: Connectivity setup complete, interior_faces = " << interior_faces << std::endl;
+    std::cout << "DEBUG [build_face_connectivity]: Exit" << std::endl;
 }
 
 void DGMesh::identify_boundary_faces(const std::map<int, std::vector<std::pair<int, int>>>& boundary_edges) {
+    std::cout << "DEBUG [identify_boundary_faces]: Entry - boundary_edges groups = " << boundary_edges.size() << std::endl;
+    
     boundary_faces_.clear();
     boundary_face_tags_.clear();
 
     // Create a map from a sorted vertex pair (face signature) to the boundary tag
     std::map<std::pair<int, int>, int> sig_to_tag;
+    std::cout << "DEBUG [identify_boundary_faces]: Building signature-to-tag map..." << std::endl;
     for (const auto& pair : boundary_edges) {
         int tag = pair.first;
         const auto& edges = pair.second;
+        std::cout << "DEBUG [identify_boundary_faces]: Processing tag " << tag << " with " << edges.size() << " edges" << std::endl;
         for (const auto& edge : edges) {
             std::pair<int, int> sig = (edge.first < edge.second) ? edge : std::make_pair(edge.second, edge.first);
             sig_to_tag[sig] = tag;
         }
     }
+    std::cout << "DEBUG [identify_boundary_faces]: sig_to_tag map built, size = " << sig_to_tag.size() << std::endl;
 
     // Identify all boundary faces and assign tags
+    std::cout << "DEBUG [identify_boundary_faces]: Identifying boundary faces..." << std::endl;
     for (int elem_id = 0; elem_id < n_elements_; ++elem_id) {
+        if (elem_id % 500 == 0 && elem_id > 0) {
+            std::cout << "DEBUG [identify_boundary_faces]: Checked " << elem_id << "/" << n_elements_ 
+                      << " elements, found " << boundary_faces_.size() << " boundary faces so far" << std::endl;
+        }
         for (int face_id = 0; face_id < n_faces_per_elem_; ++face_id) {
             if (face_neighbors_(elem_id, face_id * 2) == -1) {
                 boundary_faces_.push_back({elem_id, face_id});
@@ -349,6 +391,8 @@ void DGMesh::identify_boundary_faces(const std::map<int, std::vector<std::pair<i
             }
         }
     }
+    std::cout << "DEBUG [identify_boundary_faces]: Boundary face identification complete, total = " << boundary_faces_.size() << std::endl;
+    std::cout << "DEBUG [identify_boundary_faces]: Exit" << std::endl;
 }
 
 void DGMesh::build_precomputed_faces() {
