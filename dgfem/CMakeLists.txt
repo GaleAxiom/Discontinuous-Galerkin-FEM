@@ -6,11 +6,20 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Set up Eigen
-set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/eigen)
-add_library(Eigen3::Eigen INTERFACE IMPORTED)
-set_target_properties(Eigen3::Eigen PROPERTIES
-    INTERFACE_INCLUDE_DIRECTORIES "${EIGEN3_INCLUDE_DIR}")
+# Set up Eigen - try system first, then fall back to bundled version
+find_package(Eigen3 3.3 QUIET NO_MODULE)
+if(Eigen3_FOUND)
+    message(STATUS "Found system Eigen3: ${EIGEN3_INCLUDE_DIR}")
+else()
+    message(STATUS "Using bundled Eigen3")
+    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/eigen)
+    if(NOT EXISTS "${EIGEN3_INCLUDE_DIR}")
+        message(FATAL_ERROR "Bundled Eigen3 not found at ${EIGEN3_INCLUDE_DIR}")
+    endif()
+    add_library(Eigen3::Eigen INTERFACE IMPORTED)
+    set_target_properties(Eigen3::Eigen PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${EIGEN3_INCLUDE_DIR}")
+endif()
 
 # Find GMSH
 find_path(GMSH_INCLUDE_DIR gmsh.h)
