@@ -1,0 +1,23 @@
+# Ignore build artifacts
+dgfem/build/
+build/
+*.o
+*.a
+*.so
+
+# Ignore output files
+output/
+*.vtk
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore git files
+.git/
+.gitignore
+
+# Ignore macOS files
+.DS_Store
