@@ -17,9 +17,12 @@ class LaplaceDGSolverTest : public Test {
 protected:
     void SetUp() override {
         // Clear any existing gmsh models and reinitialize
-        if (gmsh::isInitialized()) {
+        // Note: gmsh::isInitialized() is not available in all GMSH versions
+        try {
             gmsh::clear();
             gmsh::finalize();
+        } catch (...) {
+            // GMSH not initialized, this is fine
         }
         gmsh::initialize();
         mesh = dgfem::MeshCreator::create_rectangular_mesh(1, true, 0.0, 1.0, 0.0, 1.0);
@@ -220,9 +223,12 @@ class AdvectionDGSolverTest : public Test {
 protected:
     void SetUp() override {
         // Clear any existing gmsh models and reinitialize
-        if (gmsh::isInitialized()) {
+        // Note: gmsh::isInitialized() is not available in all GMSH versions
+        try {
             gmsh::clear();
             gmsh::finalize();
+        } catch (...) {
+            // GMSH not initialized, this is fine
         }
         gmsh::initialize();
         mesh = dgfem::MeshCreator::create_rectangular_mesh(1, true, 0.0, 1.0, 0.0, 1.0);
