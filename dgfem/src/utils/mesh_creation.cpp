@@ -31,8 +31,14 @@ void MeshCreator::initialize_gmsh() {
     
     // Enable verbose GMSH output to see where crashes occur
     std::cout << "DEBUG [initialize_gmsh]: Setting GMSH options..." << std::endl;
+    std::cout.flush();  // Force flush before GMSH operations
+    
     gmsh::option::setNumber("General.Terminal", 1);
     gmsh::option::setNumber("General.Verbosity", 5);  // Maximum verbosity (0-5)
+    
+    // Force unbuffered output so we see exactly where crashes occur
+    std::cout.setf(std::ios::unitbuf);
+    std::cerr.setf(std::ios::unitbuf);
     
     // Disable automatic file saving which might fail in CI
     gmsh::option::setNumber("Mesh.SaveAll", 0);
@@ -91,8 +97,14 @@ std::shared_ptr<DGMesh> MeshCreator::create_rectangular_mesh(
     
     // Generate mesh with error handling
     std::cout << "DEBUG [create_rectangular_mesh]: Generating 2D mesh..." << std::endl;
+    std::cout.flush();  // Force output before potentially crashing operation
+    std::cerr.flush();
     try {
+        std::cout << "DEBUG [create_rectangular_mesh]: Calling gmsh::model::mesh::generate(2)..." << std::endl;
+        std::cout.flush();
         gmsh::model::mesh::generate(2);
+        std::cout << "DEBUG [create_rectangular_mesh]: gmsh::model::mesh::generate(2) returned" << std::endl;
+        std::cout.flush();
         std::cout << "DEBUG [create_rectangular_mesh]: Mesh generation completed successfully" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "ERROR [create_rectangular_mesh]: GMSH mesh generation failed: " << e.what() << std::endl;
@@ -143,8 +155,14 @@ std::shared_ptr<DGMesh> MeshCreator::create_euler_mesh(
     
     // Generate mesh with error handling
     std::cout << "DEBUG [create_euler_mesh]: Generating 2D mesh..." << std::endl;
+    std::cout.flush();  // Force output before potentially crashing operation
+    std::cerr.flush();
     try {
+        std::cout << "DEBUG [create_euler_mesh]: Calling gmsh::model::mesh::generate(2)..." << std::endl;
+        std::cout.flush();
         gmsh::model::mesh::generate(2);
+        std::cout << "DEBUG [create_euler_mesh]: gmsh::model::mesh::generate(2) returned" << std::endl;
+        std::cout.flush();
         std::cout << "DEBUG [create_euler_mesh]: Mesh generation completed successfully" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "ERROR [create_euler_mesh]: GMSH mesh generation failed: " << e.what() << std::endl;
