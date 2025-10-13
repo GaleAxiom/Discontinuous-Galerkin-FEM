@@ -22,13 +22,8 @@ DGMesh::DGMesh(const Eigen::MatrixXd& vertices,
       element_tags_(element_tags), boundary_tags_(boundary_tags),
       n_elements_(elements.rows()) {
     
-    std::cout << "DEBUG [DGMesh::DGMesh]: Constructor entry - vertices: " 
-              << vertices.rows() << "x" << vertices.cols() 
-              << ", elements: " << elements.rows() << "x" << elements.cols() << std::endl;
-    
     // Determine element type
     int n_nodes_per_elem = elements.cols();
-    std::cout << "DEBUG [DGMesh::DGMesh]: Nodes per element = " << n_nodes_per_elem << std::endl;
     
     if (n_nodes_per_elem == 3) {
         element_type_ = "triangle";
@@ -37,86 +32,52 @@ DGMesh::DGMesh(const Eigen::MatrixXd& vertices,
         element_type_ = "quad";
         n_faces_per_elem_ = 4;
     } else {
-        std::cerr << "ERROR [DGMesh::DGMesh]: Unknown element type with " << n_nodes_per_elem << " vertices" << std::endl;
         throw std::invalid_argument("Unknown element type with " + 
                                   std::to_string(n_nodes_per_elem) + " vertices");
     }
-    std::cout << "DEBUG [DGMesh::DGMesh]: Element type = " << element_type_ << ", faces per element = " << n_faces_per_elem_ << std::endl;
     
     // Build connectivity
-    std::cout << "DEBUG [DGMesh::DGMesh]: Building face connectivity..." << std::endl;
     build_face_connectivity();
-    std::cout << "DEBUG [DGMesh::DGMesh]: Face connectivity built" << std::endl;
-    
-    std::cout << "DEBUG [DGMesh::DGMesh]: Identifying boundary faces..." << std::endl;
     identify_boundary_faces(boundary_edges);
-    std::cout << "DEBUG [DGMesh::DGMesh]: Boundary faces identified, count = " << boundary_faces_.size() << std::endl;
 
     // Build node-to-element mapping
-    std::cout << "DEBUG [DGMesh::DGMesh]: Building node-to-element mapping..." << std::endl;
     for (int i = 0; i < n_elements_; ++i) {
         for (int j = 0; j < elements_.cols(); ++j) {
             int global_node_idx = elements_(i, j);
             node_to_elements_[global_node_idx].push_back({i, j});
         }
     }
-    std::cout << "DEBUG [DGMesh::DGMesh]: Node-to-element mapping built" << std::endl;
     
     std::cout << "Created DGMesh with " << n_elements_ << " " << element_type_ 
               << " elements and " << boundary_faces_.size() << " boundary faces" << std::endl;
-    std::cout << "DEBUG [DGMesh::DGMesh]: Constructor exit" << std::endl;
 }
 
 void DGMesh::initialize_dg_space(std::shared_ptr<DGSpace> dg_space, int n_variables) {
-    std::cout << "DEBUG [initialize_dg_space]: Entry - n_elements=" << n_elements_ 
-              << ", n_variables=" << n_variables << std::endl;
-    
     if (!dg_space) {
-        std::cerr << "ERROR [initialize_dg_space]: dg_space is null!" << std::endl;
         throw std::invalid_argument("DG space cannot be null");
     }
     
     dg_space_ = dg_space;
-    std::cout << "DEBUG [initialize_dg_space]: DG space assigned, order=" << dg_space->get_order() << std::endl;
     
     int n_basis = dg_space->get_basis()->get_n_basis();
-    std::cout << "DEBUG [initialize_dg_space]: Creating DGSolution with n_elements=" << n_elements_ 
-              << ", n_basis=" << n_basis << ", n_variables=" << n_variables << std::endl;
     solution_ = std::make_shared<DGSolution>(n_elements_, n_basis, n_variables);
-    std::cout << "DEBUG [initialize_dg_space]: DGSolution created" << std::endl;
     
     // Compute element and face data
-    std::cout << "DEBUG [initialize_dg_space]: Resizing element_data_ to " << n_elements_ << std::endl;
     element_data_.resize(n_elements_);
-    std::cout << "DEBUG [initialize_dg_space]: Resizing face_data_ to " << n_elements_ << std::endl;
     face_data_.resize(n_elements_);
-    std::cout << "DEBUG [initialize_dg_space]: Data structures resized, n_faces_per_elem_=" << n_faces_per_elem_ << std::endl;
     
     for (int elem_id = 0; elem_id < n_elements_; ++elem_id) {
-        if (elem_id % 500 == 0) {
-            std::cout << "DEBUG [initialize_dg_space]: Processing element " << elem_id << "/" << n_elements_ << std::endl;
-        }
-        
         // Get element vertices
-        std::cout << "DEBUG [initialize_dg_space]: Getting vertices for element " << elem_id << std::endl;
         Eigen::MatrixXd elem_vertices(elements_.cols(), 2);
         for (int i = 0; i < elements_.cols(); ++i) {
             int vertex_idx = elements_(elem_id, i);
-            if (vertex_idx < 0 || vertex_idx >= vertices_.rows()) {
-                std::cerr << "ERROR [initialize_dg_space]: Invalid vertex index " << vertex_idx 
-                          << " for element " << elem_id << ", vertex " << i << std::endl;
-                throw std::out_of_range("Vertex index out of bounds");
-            }
             elem_vertices.row(i) = vertices_.row(vertex_idx);
         }
         
         // Get face neighbors
-        std::cout << "DEBUG [initialize_dg_space]: Getting neighbors for element " << elem_id << std::endl;
         std::vector<std::pair<int, int>> neighbors = get_element_neighbors(elem_id);
-        std::cout << "DEBUG [initialize_dg_space]: Got " << neighbors.size() << " neighbors" << std::endl;
         
         // Compute element data
-        std::cout << "DEBUG [initialize_dg_space]: Computing element data for element " << elem_id << std::endl;
         element_data_[elem_id] = dg_space_->compute_element_data(elem_vertices, neighbors);
         std::cout << "DEBUG [initialize_dg_space]: Element data computed" << std::endl;
         
