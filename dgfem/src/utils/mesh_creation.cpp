@@ -23,20 +23,32 @@ void MeshCreator::finalize_gmsh() {
 std::shared_ptr<DGMesh> MeshCreator::create_rectangular_mesh(
     double dx, bool use_triangles, double xmin, double xmax, double ymin, double ymax) {
     
+    std::cout << "DEBUG [create_rectangular_mesh]: Entry - domain=[" << xmin << "," << xmax 
+              << "] x [" << ymin << "," << ymax << "], dx=" << dx 
+              << ", use_triangles=" << use_triangles << std::endl;
+    
     // Create new model
+    std::cout << "DEBUG [create_rectangular_mesh]: Adding GMSH model 'rectangular_mesh'" << std::endl;
     gmsh::model::add("rectangular_mesh");
     
     // Setup geometry
+    std::cout << "DEBUG [create_rectangular_mesh]: Setting up rectangular geometry" << std::endl;
     setup_rectangular_geometry(xmin, xmax, ymin, ymax, dx);
     
     // Configure mesh generation
+    std::cout << "DEBUG [create_rectangular_mesh]: Configuring mesh generation" << std::endl;
     configure_mesh_generation(use_triangles);
     
     // Generate mesh
+    std::cout << "DEBUG [create_rectangular_mesh]: Generating 2D mesh..." << std::endl;
     gmsh::model::mesh::generate(2);
+    std::cout << "DEBUG [create_rectangular_mesh]: Mesh generation completed" << std::endl;
     
     // Create DGMesh from current model
-    return create_dg_mesh_from_gmsh();
+    std::cout << "DEBUG [create_rectangular_mesh]: Creating DGMesh from GMSH model" << std::endl;
+    auto result = create_dg_mesh_from_gmsh();
+    std::cout << "DEBUG [create_rectangular_mesh]: DGMesh created, returning" << std::endl;
+    return result;
 }
 
 std::shared_ptr<DGMesh> MeshCreator::create_euler_mesh(
@@ -94,34 +106,51 @@ std::shared_ptr<DGMesh> MeshCreator::create_dg_mesh_from_gmsh() {
 void MeshCreator::setup_rectangular_geometry(
     double xmin, double xmax, double ymin, double ymax, double dx) {
     
+    std::cout << "DEBUG [setup_rectangular_geometry]: Entry - bounds=[" << xmin << "," << xmax 
+              << "] x [" << ymin << "," << ymax << "], dx=" << dx << std::endl;
+    
     // Add points
+    std::cout << "DEBUG [setup_rectangular_geometry]: Adding geometry points..." << std::endl;
     int p1 = gmsh::model::geo::addPoint(xmin, ymin, 0, dx);
     int p2 = gmsh::model::geo::addPoint(xmax, ymin, 0, dx);
     int p3 = gmsh::model::geo::addPoint(xmax, ymax, 0, dx);
     int p4 = gmsh::model::geo::addPoint(xmin, ymax, 0, dx);
+    std::cout << "DEBUG [setup_rectangular_geometry]: Points added: p1=" << p1 << ", p2=" << p2 
+              << ", p3=" << p3 << ", p4=" << p4 << std::endl;
     
     // Add lines
+    std::cout << "DEBUG [setup_rectangular_geometry]: Adding lines..." << std::endl;
     int l1 = gmsh::model::geo::addLine(p1, p2);  // Bottom
     int l2 = gmsh::model::geo::addLine(p2, p3);  // Right
     int l3 = gmsh::model::geo::addLine(p3, p4);  // Top
     int l4 = gmsh::model::geo::addLine(p4, p1);  // Left
+    std::cout << "DEBUG [setup_rectangular_geometry]: Lines added: l1=" << l1 << ", l2=" << l2 
+              << ", l3=" << l3 << ", l4=" << l4 << std::endl;
     
     // Add curve loop and surface
+    std::cout << "DEBUG [setup_rectangular_geometry]: Adding curve loop and surface..." << std::endl;
     int cl = gmsh::model::geo::addCurveLoop({l1, l2, l3, l4});
     int surf = gmsh::model::geo::addPlaneSurface({cl});
+    std::cout << "DEBUG [setup_rectangular_geometry]: Curve loop=" << cl << ", surface=" << surf << std::endl;
     
     // Synchronize
+    std::cout << "DEBUG [setup_rectangular_geometry]: Synchronizing geometry..." << std::endl;
     gmsh::model::geo::synchronize();
+    std::cout << "DEBUG [setup_rectangular_geometry]: Geometry synchronized" << std::endl;
     
     // Add physical groups
+    std::cout << "DEBUG [setup_rectangular_geometry]: Adding physical groups..." << std::endl;
     gmsh::model::addPhysicalGroup(2, {surf}, 1, "Domain");
     gmsh::model::addPhysicalGroup(1, {l1}, 2, "Bottom");
     gmsh::model::addPhysicalGroup(1, {l2}, 3, "Right");
     gmsh::model::addPhysicalGroup(1, {l3}, 4, "Top");
     gmsh::model::addPhysicalGroup(1, {l4}, 5, "Left");
+    std::cout << "DEBUG [setup_rectangular_geometry]: Physical groups added" << std::endl;
     
     // Final synchronization
+    std::cout << "DEBUG [setup_rectangular_geometry]: Final synchronization..." << std::endl;
     gmsh::model::geo::synchronize();
+    std::cout << "DEBUG [setup_rectangular_geometry]: Exit" << std::endl;
 }
 
 void MeshCreator::configure_mesh_generation(bool use_triangles) {
