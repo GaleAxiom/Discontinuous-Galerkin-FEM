@@ -1,0 +1,79 @@
+name: Matrix Build & Test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-matrix:
+    name: ${{ matrix.os }} - ${{ matrix.compiler }} - ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-20.04]
+        compiler: [gcc-11, gcc-12, clang-14, clang-15]
+        build_type: [Debug, Release]
+        exclude:
+          # Exclude clang-15 on ubuntu-20.04 (not available)
+          - os: ubuntu-20.04
+            compiler: clang-15
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          gmsh \
+          libgmsh-dev \
+          libeigen3-dev \
+          libgtest-dev \
+          libgmock-dev
+
+    - name: Install compiler
+      run: |
+        if [[ "${{ matrix.compiler }}" == gcc-* ]]; then
+          version=${matrix.compiler#gcc-}
+          sudo apt-get install -y gcc-${version} g++-${version}
+          echo "CC=gcc-${version}" >> $GITHUB_ENV
+          echo "CXX=g++-${version}" >> $GITHUB_ENV
+        elif [[ "${{ matrix.compiler }}" == clang-* ]]; then
+          version=${matrix.compiler#clang-}
+          sudo apt-get install -y clang-${version}
+          echo "CC=clang-${version}" >> $GITHUB_ENV
+          echo "CXX=clang++-${version}" >> $GITHUB_ENV
+        fi
+
+    - name: Build and install Google Test
+      run: |
+        cd /tmp
+        sudo cmake /usr/src/googletest
+        sudo make
+        sudo cp lib/*.a /usr/lib/ 2>/dev/null || sudo cp ./*.a /usr/lib/ 2>/dev/null || sudo find . -name "*.a" -exec cp {} /usr/lib/ \;
+
+    - name: Configure CMake
+      run: |
+        cmake -B build -S dgfem \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+          -DCMAKE_C_COMPILER=${{ env.CC }} \
+          -DCMAKE_CXX_COMPILER=${{ env.CXX }}
+
+    - name: Build
+      run: cmake --build build --config ${{ matrix.build_type }} -j$(nproc)
+
+    - name: Test
+      working-directory: build
+      run: ctest --output-on-failure
+
+    - name: Upload build artifacts
+      if: matrix.build_type == 'Release'
+      uses: actions/upload-artifact@v4
+      with:
+        name: dgfem-${{ matrix.os }}-${{ matrix.compiler }}-release
+        path: build/libdgfem.a
+        retention-days: 7

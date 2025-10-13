@@ -1,0 +1,67 @@
+name: Static Analysis
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  cppcheck:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install cppcheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cppcheck
+    
+    - name: Run cppcheck
+      run: |
+        cppcheck --enable=all --error-exitcode=1 \
+          --suppress=missingIncludeSystem \
+          --suppress=unmatchedSuppression \
+          --inline-suppr \
+          -I dgfem/include \
+          dgfem/src dgfem/examples 2>&1 | tee cppcheck-report.txt
+      continue-on-error: true
+    
+    - name: Upload cppcheck report
+      uses: actions/upload-artifact@v4
+      with:
+        name: cppcheck-report
+        path: cppcheck-report.txt
+        retention-days: 7
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/galeaxiom/discontinuous-galerkin-fem:latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install clang-tidy
+      run: |
+        apt-get update
+        apt-get install -y clang-tidy
+
+    - name: Configure CMake
+      run: cmake -B build -S dgfem -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+    - name: Run clang-tidy
+      run: |
+        # Run clang-tidy on source files
+        find dgfem/src -name "*.cpp" -exec \
+          clang-tidy {} -p build --checks='-*,modernize-*,performance-*,readability-*' \; \
+          2>&1 | tee clang-tidy-report.txt || true
+      continue-on-error: true
+
+    - name: Upload clang-tidy report
+      uses: actions/upload-artifact@v4
+      with:
+        name: clang-tidy-report
+        path: clang-tidy-report.txt
+        retention-days: 7
