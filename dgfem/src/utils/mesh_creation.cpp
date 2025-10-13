@@ -17,16 +17,22 @@ void MeshCreator::initialize_gmsh() {
     
     // Check if GMSH is already initialized (from a crashed previous test)
     bool was_initialized = gmsh::isInitialized();
+    std::cout << "DEBUG [initialize_gmsh]: GMSH was_initialized = " << was_initialized << std::endl;
+    
     if (was_initialized) {
         std::cout << "DEBUG [initialize_gmsh]: GMSH already initialized, clearing state..." << std::endl;
         gmsh::clear();  // Clear any leftover models
+        std::cout << "DEBUG [initialize_gmsh]: GMSH state cleared" << std::endl;
     } else {
+        std::cout << "DEBUG [initialize_gmsh]: Calling gmsh::initialize()..." << std::endl;
         gmsh::initialize();
+        std::cout << "DEBUG [initialize_gmsh]: gmsh::initialize() completed" << std::endl;
     }
     
-    // Disable GMSH's terminal output (except errors)
-    // gmsh::option::setNumber("General.Terminal", 1);
-    // gmsh::option::setNumber("General.Verbosity", 2);  // Errors only
+    // Enable verbose GMSH output to see where crashes occur
+    std::cout << "DEBUG [initialize_gmsh]: Setting GMSH options..." << std::endl;
+    gmsh::option::setNumber("General.Terminal", 1);
+    gmsh::option::setNumber("General.Verbosity", 5);  // Maximum verbosity (0-5)
     
     // Disable automatic file saving which might fail in CI
     gmsh::option::setNumber("Mesh.SaveAll", 0);
@@ -42,7 +48,7 @@ void MeshCreator::initialize_gmsh() {
     gmsh::option::setNumber("Mesh.MaxNumThreads2D", 1);
     gmsh::option::setNumber("Mesh.MaxNumThreads3D", 1);
     
-    std::cout << "DEBUG [initialize_gmsh]: GMSH initialized with CI-safe options (single-threaded)" << std::endl;
+    std::cout << "DEBUG [initialize_gmsh]: GMSH initialized with CI-safe options (single-threaded, verbosity=5)" << std::endl;
 }
 
 void MeshCreator::finalize_gmsh() {
