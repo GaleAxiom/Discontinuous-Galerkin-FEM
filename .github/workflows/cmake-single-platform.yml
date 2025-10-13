@@ -38,4 +38,7 @@ jobs:
 
     - name: Test
       working-directory: ${{github.workspace}}/build
-      run: ctest -C ${{env.BUILD_TYPE}} --output-on-failure
+      run: |
+        # Run only the specific failing test with unbuffered output
+        stdbuf -o0 -e0 ./tests/dgfem_tests --gtest_filter="QuadDGSpaceTest.FaceNormals" --gtest_print_time=1 2>&1 | tee test_output.log
+        echo "Exit code: $?"

@@ -9,15 +9,35 @@
 #include <iostream>
 #include <stdexcept>
 #include <optional>
+#include <csignal>
+#include <cstdio>
+#include <cstring>
+#include <unistd.h>
+
+// Signal handler to catch segfaults and print diagnostic
+void segfault_handler(int sig) {
+    const char* msg = "\n\n*** SEGFAULT CAUGHT during GMSH operation! Signal: ";
+    write(STDERR_FILENO, msg, strlen(msg));
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d ***\n\n", sig);
+    write(STDERR_FILENO, buf, strlen(buf));
+    std::abort();
+}
 
 namespace dgfem {
 
 void MeshCreator::initialize_gmsh() {
+    // Install signal handler to catch segfaults
+    std::signal(SIGSEGV, segfault_handler);
+    std::signal(SIGABRT, segfault_handler);
+    
     std::cout << "DEBUG [initialize_gmsh]: Initializing GMSH..." << std::endl;
+    std::cout.flush();
     
     // Check if GMSH is already initialized (from a crashed previous test)
     bool was_initialized = gmsh::isInitialized();
     std::cout << "DEBUG [initialize_gmsh]: GMSH was_initialized = " << was_initialized << std::endl;
+    std::cout.flush();
     
     if (was_initialized) {
         std::cout << "DEBUG [initialize_gmsh]: GMSH already initialized, clearing state..." << std::endl;
@@ -33,12 +53,14 @@ void MeshCreator::initialize_gmsh() {
     std::cout << "DEBUG [initialize_gmsh]: Setting GMSH options..." << std::endl;
     std::cout.flush();  // Force flush before GMSH operations
     
-    gmsh::option::setNumber("General.Terminal", 1);
-    gmsh::option::setNumber("General.Verbosity", 5);  // Maximum verbosity (0-5)
-    
     // Force unbuffered output so we see exactly where crashes occur
     std::cout.setf(std::ios::unitbuf);
     std::cerr.setf(std::ios::unitbuf);
+    std::setvbuf(stdout, nullptr, _IONBF, 0);  // Completely unbuffered stdout
+    std::setvbuf(stderr, nullptr, _IONBF, 0);  // Completely unbuffered stderr
+    
+    gmsh::option::setNumber("General.Terminal", 1);
+    gmsh::option::setNumber("General.Verbosity", 99);  // Even higher verbosity
     
     // Disable automatic file saving which might fail in CI
     gmsh::option::setNumber("Mesh.SaveAll", 0);
@@ -93,17 +115,24 @@ std::shared_ptr<DGMesh> MeshCreator::create_rectangular_mesh(
     
     // Configure mesh generation
     std::cout << "DEBUG [create_rectangular_mesh]: Configuring mesh generation" << std::endl;
+    std::cout.flush();
     configure_mesh_generation(use_triangles);
+    std::cout << "DEBUG [create_rectangular_mesh]: Mesh configuration complete" << std::endl;
+    std::cout.flush();
     
     // Generate mesh with error handling
-    std::cout << "DEBUG [create_rectangular_mesh]: Generating 2D mesh..." << std::endl;
-    std::cout.flush();  // Force output before potentially crashing operation
-    std::cerr.flush();
+    std::cout << "DEBUG [create_rectangular_mesh]: ===== ABOUT TO GENERATE 2D MESH =====" << std::endl;
+    std::cout.flush();
+    fflush(stdout);
+    fflush(stderr);
     try {
-        std::cout << "DEBUG [create_rectangular_mesh]: Calling gmsh::model::mesh::generate(2)..." << std::endl;
-        std::cout.flush();
+        std::cout << "DEBUG [create_rectangular_mesh]: >>>>> Calling gmsh::model::mesh::generate(2) NOW <<<<<" << std::endl;
+        fflush(stdout);
+        fflush(stderr);
         gmsh::model::mesh::generate(2);
-        std::cout << "DEBUG [create_rectangular_mesh]: gmsh::model::mesh::generate(2) returned" << std::endl;
+        fflush(stdout);
+        fflush(stderr);
+        std::cout << "DEBUG [create_rectangular_mesh]: >>>>> gmsh::model::mesh::generate(2) RETURNED SUCCESSFULLY <<<<<" << std::endl;
         std::cout.flush();
         std::cout << "DEBUG [create_rectangular_mesh]: Mesh generation completed successfully" << std::endl;
     } catch (const std::exception& e) {
