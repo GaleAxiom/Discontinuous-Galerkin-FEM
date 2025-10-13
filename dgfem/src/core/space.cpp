@@ -104,20 +104,47 @@ std::map<std::string, Eigen::VectorXd> DGSpace::compute_face_data(
     int face_id,
     const std::pair<int, int>& neighbor_info) const {
     
+    std::cout << "DEBUG [compute_face_data]: Entry - vertices: " << vertices.rows() << "x" << vertices.cols() 
+              << ", face_id=" << face_id << ", neighbor=(" << neighbor_info.first << "," << neighbor_info.second << ")" << std::endl;
+    
     std::map<std::string, Eigen::VectorXd> data;
     
+    // Validate face_id
+    if (!ref_element_) {
+        std::cerr << "ERROR [compute_face_data]: ref_element_ is null!" << std::endl;
+        throw std::runtime_error("Reference element not initialized");
+    }
+    
+    std::cout << "DEBUG [compute_face_data]: Getting edge vertices for face " << face_id << std::endl;
     // Get face vertex indices
     auto [v1_idx, v2_idx] = ref_element_->edge_vertices(face_id);
+    std::cout << "DEBUG [compute_face_data]: Edge vertices: v1_idx=" << v1_idx << ", v2_idx=" << v2_idx << std::endl;
+    
+    if (v1_idx < 0 || v1_idx >= vertices.rows() || v2_idx < 0 || v2_idx >= vertices.rows()) {
+        std::cerr << "ERROR [compute_face_data]: Invalid vertex indices v1_idx=" << v1_idx 
+                  << ", v2_idx=" << v2_idx << " for vertices matrix of size " << vertices.rows() << std::endl;
+        throw std::out_of_range("Vertex index out of bounds in compute_face_data");
+    }
+    
     Eigen::Vector2d v1 = vertices.row(v1_idx);
     Eigen::Vector2d v2 = vertices.row(v2_idx);
+    std::cout << "DEBUG [compute_face_data]: v1=(" << v1.transpose() << "), v2=(" << v2.transpose() << ")" << std::endl;
     
     // Compute face properties
     Eigen::Vector2d tangent = v2 - v1;
     double edge_length = tangent.norm();
+    std::cout << "DEBUG [compute_face_data]: edge_length=" << edge_length << std::endl;
+    
+    if (edge_length < 1e-14) {
+        std::cerr << "ERROR [compute_face_data]: Degenerate edge with length " << edge_length << std::endl;
+        throw std::runtime_error("Degenerate edge detected");
+    }
+    
     // Compute normal: rotate tangent 90 degrees clockwise (right-hand rule for outward normal)
     // normal = (tangent_y, -tangent_x)
     Eigen::Vector2d normal(tangent[1], -tangent[0]);
     normal /= edge_length;
+    std::cout << "DEBUG [compute_face_data]: Initial normal=(" << normal.transpose() << ")" << std::endl;
     
     // Ensure outward normal by checking against centroid
     Eigen::Vector2d centroid = vertices.colwise().mean();
@@ -129,15 +156,33 @@ std::map<std::string, Eigen::VectorXd> DGSpace::compute_face_data(
     // Which means it should have positive dot product with (edge - centroid)
     // If dot product is negative, the normal points inward, so flip it
     if (normal.dot(from_centroid_to_edge) < 0) {
+        std::cout << "DEBUG [compute_face_data]: Flipping normal to point outward" << std::endl;
         normal = -normal;
     }
+    std::cout << "DEBUG [compute_face_data]: Final normal=(" << normal.transpose() << ")" << std::endl;
     
     // Compute quadrature points on face
+    if (!face_quad_) {
+        std::cerr << "ERROR [compute_face_data]: face_quad_ is null!" << std::endl;
+        throw std::runtime_error("Face quadrature not initialized");
+    }
+    if (!basis_) {
+        std::cerr << "ERROR [compute_face_data]: basis_ is null!" << std::endl;
+        throw std::runtime_error("Basis not initialized");
+    }
+    if (!mapping_) {
+        std::cerr << "ERROR [compute_face_data]: mapping_ is null!" << std::endl;
+        throw std::runtime_error("Mapping not initialized");
+    }
+    
     int n_face_quad = face_quad_->size();
+    std::cout << "DEBUG [compute_face_data]: n_face_quad=" << n_face_quad << std::endl;
     Eigen::MatrixXd quad_points(n_face_quad, 2);
     int n_basis = basis_->get_n_basis();
+    std::cout << "DEBUG [compute_face_data]: n_basis=" << n_basis << std::endl;
     Eigen::VectorXd dphi_dx_face(n_face_quad * n_basis * 2);
     
+    std::cout << "DEBUG [compute_face_data]: Computing quadrature points..." << std::endl;
     for (int q = 0; q < n_face_quad; ++q) {
         double s = face_quad_->points(q, 0);  // 1D quadrature point in [-1, 1]
         double t = 0.5 * (s + 1.0);  // Map to [0, 1]
@@ -153,8 +198,10 @@ std::map<std::string, Eigen::VectorXd> DGSpace::compute_face_data(
             dphi_dx_face[row_offset * 2 + 1] = grad_phys[1];
         }
     }
+    std::cout << "DEBUG [compute_face_data]: Quadrature computation complete" << std::endl;
     
     // Store face data
+    std::cout << "DEBUG [compute_face_data]: Storing face data in map..." << std::endl;
     data["normal"] = normal;
     data["length"] = Eigen::VectorXd::Constant(1, edge_length);
     data["quad_points"] = Eigen::Map<Eigen::VectorXd>(quad_points.data(), quad_points.size());
@@ -163,6 +210,8 @@ std::map<std::string, Eigen::VectorXd> DGSpace::compute_face_data(
     data["is_boundary"] = Eigen::VectorXd::Constant(1, (neighbor_info.first < 0) ? 1.0 : 0.0);
     data["dphi_dx_face"] = dphi_dx_face;
     
+    std::cout << "DEBUG [compute_face_data]: Face data stored, map size=" << data.size() << std::endl;
+    std::cout << "DEBUG [compute_face_data]: Exit" << std::endl;
     return data;
 }
 
@@ -253,23 +302,34 @@ void DGSpace::precompute_basis_values() {
 }
 
 Eigen::Vector2d DGSpace::map_face_quad_point(int face_id, double s) const {
+    std::cout << "DEBUG [map_face_quad_point]: face_id=" << face_id << ", s=" << s 
+              << ", element_type=" << element_type_ << std::endl;
+    
     if (element_type_ == "triangle") {
         double t = 0.5 * (s + 1.0);  // Map [-1,1] to [0,1]
         switch (face_id) {
             case 0: return Eigen::Vector2d(t, 0.0);        // Bottom edge
             case 1: return Eigen::Vector2d(1.0 - t, t);    // Diagonal edge
             case 2: return Eigen::Vector2d(0.0, 1.0 - t);  // Left edge
-            default: throw std::out_of_range("Invalid face for triangle");
+            default: 
+                std::cerr << "ERROR [map_face_quad_point]: Invalid face_id " << face_id << " for triangle" << std::endl;
+                throw std::out_of_range("Invalid face for triangle");
         }
     } else if (element_type_ == "quad") {
+        Eigen::Vector2d result;
         switch (face_id) {
-            case 0: return Eigen::Vector2d(s, -1.0);   // Bottom edge
-            case 1: return Eigen::Vector2d(1.0, s);    // Right edge
-            case 2: return Eigen::Vector2d(-s, 1.0);   // Top edge (note -s)
-            case 3: return Eigen::Vector2d(-1.0, -s);  // Left edge (note -s)
-            default: throw std::out_of_range("Invalid face for quad");
+            case 0: result = Eigen::Vector2d(s, -1.0); break;   // Bottom edge
+            case 1: result = Eigen::Vector2d(1.0, s); break;    // Right edge
+            case 2: result = Eigen::Vector2d(-s, 1.0); break;   // Top edge (note -s)
+            case 3: result = Eigen::Vector2d(-1.0, -s); break;  // Left edge (note -s)
+            default: 
+                std::cerr << "ERROR [map_face_quad_point]: Invalid face_id " << face_id << " for quad" << std::endl;
+                throw std::out_of_range("Invalid face for quad");
         }
+        std::cout << "DEBUG [map_face_quad_point]: Returning (" << result.transpose() << ")" << std::endl;
+        return result;
     } else {
+        std::cerr << "ERROR [map_face_quad_point]: Unknown element type '" << element_type_ << "'" << std::endl;
         throw std::invalid_argument("Unknown element type");
     }
 }

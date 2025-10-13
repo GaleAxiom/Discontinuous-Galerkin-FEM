@@ -68,31 +68,68 @@ DGMesh::DGMesh(const Eigen::MatrixXd& vertices,
 }
 
 void DGMesh::initialize_dg_space(std::shared_ptr<DGSpace> dg_space, int n_variables) {
+    std::cout << "DEBUG [initialize_dg_space]: Entry - n_elements=" << n_elements_ 
+              << ", n_variables=" << n_variables << std::endl;
+    
+    if (!dg_space) {
+        std::cerr << "ERROR [initialize_dg_space]: dg_space is null!" << std::endl;
+        throw std::invalid_argument("DG space cannot be null");
+    }
+    
     dg_space_ = dg_space;
-    solution_ = std::make_shared<DGSolution>(n_elements_, dg_space->get_basis()->get_n_basis(), n_variables);
+    std::cout << "DEBUG [initialize_dg_space]: DG space assigned, order=" << dg_space->get_order() << std::endl;
+    
+    int n_basis = dg_space->get_basis()->get_n_basis();
+    std::cout << "DEBUG [initialize_dg_space]: Creating DGSolution with n_elements=" << n_elements_ 
+              << ", n_basis=" << n_basis << ", n_variables=" << n_variables << std::endl;
+    solution_ = std::make_shared<DGSolution>(n_elements_, n_basis, n_variables);
+    std::cout << "DEBUG [initialize_dg_space]: DGSolution created" << std::endl;
     
     // Compute element and face data
+    std::cout << "DEBUG [initialize_dg_space]: Resizing element_data_ to " << n_elements_ << std::endl;
     element_data_.resize(n_elements_);
+    std::cout << "DEBUG [initialize_dg_space]: Resizing face_data_ to " << n_elements_ << std::endl;
     face_data_.resize(n_elements_);
+    std::cout << "DEBUG [initialize_dg_space]: Data structures resized, n_faces_per_elem_=" << n_faces_per_elem_ << std::endl;
     
     for (int elem_id = 0; elem_id < n_elements_; ++elem_id) {
+        if (elem_id % 500 == 0) {
+            std::cout << "DEBUG [initialize_dg_space]: Processing element " << elem_id << "/" << n_elements_ << std::endl;
+        }
+        
         // Get element vertices
+        std::cout << "DEBUG [initialize_dg_space]: Getting vertices for element " << elem_id << std::endl;
         Eigen::MatrixXd elem_vertices(elements_.cols(), 2);
         for (int i = 0; i < elements_.cols(); ++i) {
-            elem_vertices.row(i) = vertices_.row(elements_(elem_id, i));
+            int vertex_idx = elements_(elem_id, i);
+            if (vertex_idx < 0 || vertex_idx >= vertices_.rows()) {
+                std::cerr << "ERROR [initialize_dg_space]: Invalid vertex index " << vertex_idx 
+                          << " for element " << elem_id << ", vertex " << i << std::endl;
+                throw std::out_of_range("Vertex index out of bounds");
+            }
+            elem_vertices.row(i) = vertices_.row(vertex_idx);
         }
         
         // Get face neighbors
+        std::cout << "DEBUG [initialize_dg_space]: Getting neighbors for element " << elem_id << std::endl;
         std::vector<std::pair<int, int>> neighbors = get_element_neighbors(elem_id);
+        std::cout << "DEBUG [initialize_dg_space]: Got " << neighbors.size() << " neighbors" << std::endl;
         
         // Compute element data
+        std::cout << "DEBUG [initialize_dg_space]: Computing element data for element " << elem_id << std::endl;
         element_data_[elem_id] = dg_space_->compute_element_data(elem_vertices, neighbors);
+        std::cout << "DEBUG [initialize_dg_space]: Element data computed" << std::endl;
         
         // Compute face data
+        std::cout << "DEBUG [initialize_dg_space]: Resizing face_data_[" << elem_id << "] to " << n_faces_per_elem_ << std::endl;
         face_data_[elem_id].resize(n_faces_per_elem_);
+        
         for (int face_id = 0; face_id < n_faces_per_elem_; ++face_id) {
             std::pair<int, int> neighbor = (face_id < neighbors.size()) ? neighbors[face_id] : std::make_pair(-1, -1);
+            std::cout << "DEBUG [initialize_dg_space]: Computing face data for element " << elem_id 
+                      << ", face " << face_id << ", neighbor=(" << neighbor.first << "," << neighbor.second << ")" << std::endl;
             face_data_[elem_id][face_id] = dg_space_->compute_face_data(elem_vertices, face_id, neighbor);
+            std::cout << "DEBUG [initialize_dg_space]: Face data computed" << std::endl;
         }
     }
     
@@ -100,7 +137,10 @@ void DGMesh::initialize_dg_space(std::shared_ptr<DGSpace> dg_space, int n_variab
               << ", " << dg_space->get_basis()->get_n_basis() << " basis functions per element" << std::endl;
     
     // Build precomputed face connectivity for efficient assembly
+    std::cout << "DEBUG [initialize_dg_space]: Building precomputed faces..." << std::endl;
     build_precomputed_faces();
+    std::cout << "DEBUG [initialize_dg_space]: Precomputed faces built" << std::endl;
+    std::cout << "DEBUG [initialize_dg_space]: Exit" << std::endl;
 }
 
 std::vector<std::pair<int, int>> DGMesh::get_element_neighbors(int elem_id) const {
@@ -126,15 +166,35 @@ const std::map<std::string, Eigen::MatrixXd>& DGMesh::get_element_data(int elem_
 }
 
 const std::map<std::string, Eigen::VectorXd>& DGMesh::get_face_data(int elem_id, int face_id) const {
+    std::cout << "DEBUG [get_face_data]: Entry - elem_id=" << elem_id << ", face_id=" << face_id << std::endl;
+    
     if (!dg_space_) {
+        std::cerr << "ERROR [get_face_data]: DG space not initialized!" << std::endl;
         throw std::runtime_error("DG space not initialized");
     }
     if (elem_id < 0 || elem_id >= n_elements_) {
+        std::cerr << "ERROR [get_face_data]: Element index " << elem_id << " out of range [0, " << n_elements_ << ")" << std::endl;
         throw std::out_of_range("Element index out of range");
     }
     if (face_id < 0 || face_id >= n_faces_per_elem_) {
+        std::cerr << "ERROR [get_face_data]: Face index " << face_id << " out of range [0, " << n_faces_per_elem_ << ")" << std::endl;
         throw std::out_of_range("Face index out of range");
     }
+    
+    // Check if face_data_ is properly sized
+    if (elem_id >= static_cast<int>(face_data_.size())) {
+        std::cerr << "ERROR [get_face_data]: face_data_ size is " << face_data_.size() 
+                  << " but trying to access elem_id " << elem_id << std::endl;
+        throw std::out_of_range("face_data_ not properly sized for element");
+    }
+    
+    if (face_id >= static_cast<int>(face_data_[elem_id].size())) {
+        std::cerr << "ERROR [get_face_data]: face_data_[" << elem_id << "] size is " << face_data_[elem_id].size() 
+                  << " but trying to access face_id " << face_id << std::endl;
+        throw std::out_of_range("face_data_ not properly sized for face");
+    }
+    
+    std::cout << "DEBUG [get_face_data]: Returning face data, map size=" << face_data_[elem_id][face_id].size() << std::endl;
     return face_data_[elem_id][face_id];
 }
 
