@@ -9,7 +9,6 @@
 #include <Eigen/Dense>
 #include <memory>
 #include <optional>
-#include <expected>
 
 namespace dgfem {
 
