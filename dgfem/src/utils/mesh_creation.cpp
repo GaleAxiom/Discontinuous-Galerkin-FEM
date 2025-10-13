@@ -109,9 +109,9 @@ std::shared_ptr<DGMesh> MeshCreator::create_rectangular_mesh(
     std::cout << "DEBUG [create_rectangular_mesh]: Adding GMSH model 'rectangular_mesh'" << std::endl;
     gmsh::model::add("rectangular_mesh");
     
-    // Setup geometry
+    // Setup geometry (transfinite only for quads)
     std::cout << "DEBUG [create_rectangular_mesh]: Setting up rectangular geometry" << std::endl;
-    setup_rectangular_geometry(xmin, xmax, ymin, ymax, dx);
+    setup_rectangular_geometry(xmin, xmax, ymin, ymax, dx, use_triangles);
     
     // Configure mesh generation
     std::cout << "DEBUG [create_rectangular_mesh]: Configuring mesh generation" << std::endl;
@@ -174,9 +174,9 @@ std::shared_ptr<DGMesh> MeshCreator::create_euler_mesh(
     std::cout << "DEBUG [create_euler_mesh]: Adding GMSH model 'euler_mesh'" << std::endl;
     gmsh::model::add("euler_mesh");
     
-    // Setup geometry
+    // Setup geometry (transfinite only for quads)
     std::cout << "DEBUG [create_euler_mesh]: Setting up rectangular geometry" << std::endl;
-    setup_rectangular_geometry(xmin, xmax, ymin, ymax, dx);
+    setup_rectangular_geometry(xmin, xmax, ymin, ymax, dx, use_triangles);
     
     // Configure mesh generation
     std::cout << "DEBUG [create_euler_mesh]: Configuring mesh generation" << std::endl;
@@ -230,10 +230,14 @@ std::shared_ptr<DGMesh> MeshCreator::create_dg_mesh_from_gmsh() {
 }
 
 void MeshCreator::setup_rectangular_geometry(
-    double xmin, double xmax, double ymin, double ymax, double dx) {
+    double xmin, double xmax, double ymin, double ymax, double dx, bool use_triangles) {
     
     std::cout << "DEBUG [setup_rectangular_geometry]: Entry - bounds=[" << xmin << "," << xmax 
               << "] x [" << ymin << "," << ymax << "], dx=" << dx << std::endl;
+    
+    // Calculate number of divisions
+    int nx = static_cast<int>((xmax - xmin) / dx);
+    int ny = static_cast<int>((ymax - ymin) / dx);
     
     // Add points
     std::cout << "DEBUG [setup_rectangular_geometry]: Adding geometry points..." << std::endl;
@@ -259,6 +263,23 @@ void MeshCreator::setup_rectangular_geometry(
     int surf = gmsh::model::geo::addPlaneSurface({cl});
     std::cout << "DEBUG [setup_rectangular_geometry]: Curve loop=" << cl << ", surface=" << surf << std::endl;
     
+    // Only use transfinite for quads (structured mesh)
+    if (!use_triangles) {
+        // Set transfinite curves for structured mesh
+        std::cout << "DEBUG [setup_rectangular_geometry]: Setting transfinite curves..." << std::endl;
+        gmsh::model::geo::mesh::setTransfiniteCurve(l1, nx + 1);
+        gmsh::model::geo::mesh::setTransfiniteCurve(l2, ny + 1);
+        gmsh::model::geo::mesh::setTransfiniteCurve(l3, nx + 1);
+        gmsh::model::geo::mesh::setTransfiniteCurve(l4, ny + 1);
+        std::cout << "DEBUG [setup_rectangular_geometry]: Transfinite curves set: nx=" << nx << ", ny=" << ny << std::endl;
+        
+        // Set transfinite surface for structured quad mesh
+        std::cout << "DEBUG [setup_rectangular_geometry]: Setting transfinite surface..." << std::endl;
+        gmsh::model::geo::mesh::setTransfiniteSurface(surf);
+        gmsh::model::geo::mesh::setRecombine(2, surf);  // Recombine into quads
+        std::cout << "DEBUG [setup_rectangular_geometry]: Transfinite surface set" << std::endl;
+    }
+    
     // Synchronize
     std::cout << "DEBUG [setup_rectangular_geometry]: Synchronizing geometry..." << std::endl;
     gmsh::model::geo::synchronize();
@@ -281,14 +302,10 @@ void MeshCreator::setup_rectangular_geometry(
 
 void MeshCreator::configure_mesh_generation(bool use_triangles) {
     if (!use_triangles) {
-        // Recombine triangles into quadrilaterals
-        gmsh::model::mesh::setRecombine(2, 1);  // Surface tag 1
-        
-        // Set mesh algorithm for quads - use transfinite for structured mesh
+        // Transfinite meshing is already set up in setup_rectangular_geometry
+        // Just ensure recombination is enabled
         gmsh::option::setNumber("Mesh.RecombineAll", 1);
-        gmsh::option::setNumber("Mesh.RecombinationAlgorithm", 1);  // Blossom
-        gmsh::option::setNumber("Mesh.Algorithm", 8);  // Frontal-Delaunay for quads
-        std::cout << "Mesh configuration: QUADS" << std::endl;
+        std::cout << "Mesh configuration: QUADS (transfinite structured mesh)" << std::endl;
     } else {
         std::cout << "Mesh configuration: TRIANGLES" << std::endl;
     }

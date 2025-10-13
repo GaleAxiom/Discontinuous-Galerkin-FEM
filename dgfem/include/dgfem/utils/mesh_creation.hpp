@@ -91,7 +91,7 @@ private:
      * @brief Set up rectangular geometry in GMSH
      */
     static void setup_rectangular_geometry(
-        double xmin, double xmax, double ymin, double ymax, double dx
+        double xmin, double xmax, double ymin, double ymax, double dx, bool use_triangles = false
     );
     
     /**
