@@ -13,11 +13,14 @@
 namespace dgfem {
 
 void MeshCreator::initialize_gmsh() {
-    // Check if GMSH is already initialized (from a crashed previous test)
-    if (gmsh::isInitialized()) {
-        gmsh::clear();  // Clear any leftover models
-    } else {
+    // Initialize GMSH if not already initialized
+    // Note: gmsh::isInitialized() is not available in all GMSH versions
+    // We use a try-catch approach instead
+    try {
         gmsh::initialize();
+    } catch (...) {
+        // Already initialized, clear any leftover models
+        gmsh::clear();
     }
     
     // Disable GMSH terminal output (keep errors only)
@@ -142,12 +145,19 @@ void MeshCreator::setup_rectangular_geometry(
     // Synchronize
     gmsh::model::geo::synchronize();
     
-    // Add physical groups
-    gmsh::model::addPhysicalGroup(2, {surf}, 1, "Domain");
-    gmsh::model::addPhysicalGroup(1, {l1}, 2, "Bottom");
-    gmsh::model::addPhysicalGroup(1, {l2}, 3, "Right");
-    gmsh::model::addPhysicalGroup(1, {l3}, 4, "Top");
-    gmsh::model::addPhysicalGroup(1, {l4}, 5, "Left");
+    // Add physical groups (without names for compatibility with older GMSH versions)
+    gmsh::model::addPhysicalGroup(2, {surf}, 1);
+    gmsh::model::addPhysicalGroup(1, {l1}, 2);
+    gmsh::model::addPhysicalGroup(1, {l2}, 3);
+    gmsh::model::addPhysicalGroup(1, {l3}, 4);
+    gmsh::model::addPhysicalGroup(1, {l4}, 5);
+    
+    // Set physical group names separately for better compatibility
+    gmsh::model::setPhysicalName(2, 1, "Domain");
+    gmsh::model::setPhysicalName(1, 2, "Bottom");
+    gmsh::model::setPhysicalName(1, 3, "Right");
+    gmsh::model::setPhysicalName(1, 4, "Top");
+    gmsh::model::setPhysicalName(1, 5, "Left");
     
     // Final synchronization
     gmsh::model::geo::synchronize();
