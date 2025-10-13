@@ -1,0 +1,41 @@
+name: Code Formatting Check
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+
+jobs:
+  clang-format-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install clang-format
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format
+    
+    - name: Check code formatting
+      run: |
+        # Find all C++ files and check if they need formatting
+        files_to_check=$(find dgfem/src dgfem/include dgfem/tests dgfem/examples -type f \( -name "*.cpp" -o -name "*.hpp" \))
+        
+        # Check formatting for each file
+        needs_formatting=0
+        for file in $files_to_check; do
+          if ! clang-format --dry-run --Werror "$file" 2>/dev/null; then
+            echo "❌ File needs formatting: $file"
+            needs_formatting=1
+          fi
+        done
+        
+        if [ $needs_formatting -eq 1 ]; then
+          echo ""
+          echo "Some files need formatting. Please run './format-code.sh' locally and commit the changes."
+          exit 1
+        else
+          echo "✅ All files are properly formatted!"
+        fi

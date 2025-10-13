@@ -1,0 +1,138 @@
+---
+# Clang-Format configuration for Discontinuous Galerkin FEM project
+# Based on LLVM style with project-specific customizations
+
+BasedOnStyle: LLVM
+
+# Language settings
+Language: Cpp
+Standard: c++17
+
+# Indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+IndentCaseLabels: false
+IndentPPDirectives: None
+AccessModifierOffset: -4
+
+# Line breaking
+ColumnLimit: 100
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterFunction: false
+  AfterNamespace: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+
+# Function and constructor formatting
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+BinPackArguments: true
+BinPackParameters: true
+ConstructorInitializerIndentWidth: 4
+BreakConstructorInitializers: BeforeColon
+AlignAfterOpenBracket: Align
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
+AllowShortLambdasOnASingleLine: All
+
+# Pointer and reference alignment
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# Spacing
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCpp11BracedList: false
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 2
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
+SpacesInContainerLiterals: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# Include sorting and formatting
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Project headers (dgfem/*)
+  - Regex:           '^"dgfem/'
+    Priority:        1
+  # C++ standard library headers
+  - Regex:           '^<(algorithm|array|atomic|bitset|chrono|complex|condition_variable|deque|exception|forward_list|fstream|functional|future|initializer_list|iomanip|ios|iosfwd|iostream|istream|iterator|limits|list|locale|map|memory|mutex|new|numeric|ostream|queue|random|ratio|regex|scoped_allocator|set|sstream|stack|stdexcept|streambuf|string|system_error|thread|tuple|type_traits|typeindex|typeinfo|unordered_map|unordered_set|utility|valarray|vector)'
+    Priority:        3
+  # C standard library headers
+  - Regex:           '^<.*\.h>'
+    Priority:        4
+  # Third-party library headers (Eigen, gmsh, etc.)
+  - Regex:           '^<'
+    Priority:        2
+
+# Comments
+ReflowComments: true
+AlignTrailingComments: true
+
+# Alignment
+AlignConsecutiveAssignments: None
+AlignConsecutiveBitFields: None
+AlignConsecutiveDeclarations: None
+AlignConsecutiveMacros: None
+AlignEscapedNewlines: Right
+AlignOperands: Align
+AlignArrayOfStructures: None
+
+# Namespace formatting
+CompactNamespaces: false
+FixNamespaceComments: true
+NamespaceIndentation: None
+
+# Empty lines
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+# Other
+IndentWrappedFunctionNames: false
+InsertTrailingCommas: None
+PenaltyBreakAssignment: 2
+PenaltyBreakBeforeFirstCallParameter: 19
+PenaltyBreakComment: 300
+PenaltyBreakFirstLessLess: 120
+PenaltyBreakString: 1000
+PenaltyExcessCharacter: 1000000
+PenaltyReturnTypeOnItsOwnLine: 60
+PenaltyIndentedWhitespace: 0
+
+# Preprocessor
+IndentPPDirectives: None
+
+# Template formatting
+AlwaysBreakTemplateDeclarations: Yes
+
+# Qualifiers
+QualifierAlignment: Leave

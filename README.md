@@ -191,9 +191,33 @@ Contributions are welcome! Please:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+3. **Format your code** using clang-format:
+
+   ```bash
+   ./format-code.sh
+   ```
+
+   Or format a specific file:
+
+   ```bash
+   clang-format -i path/to/your/file.cpp
+   ```
+
+4. Commit your changes (`git commit -m 'Add amazing feature'`)
+5. Push to the branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request
+
+### Code Style
+
+This project uses `clang-format` to ensure consistent code formatting. The configuration is defined in `.clang-format` at the root of the repository. Key style guidelines:
+
+- **Indentation**: 4 spaces (no tabs)
+- **Line length**: 100 characters maximum
+- **Pointer/Reference**: Left-aligned (`Type* ptr`, `Type& ref`)
+- **Braces**: LLVM style (opening brace on same line)
+- **Naming**: Snake_case for variables, PascalCase for classes
+
+The CI pipeline automatically checks code formatting. Make sure to run `./format-code.sh` before committing!
 
 ## 📄 License
 
