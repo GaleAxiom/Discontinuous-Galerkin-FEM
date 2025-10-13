@@ -14,7 +14,15 @@ namespace dgfem {
 
 void MeshCreator::initialize_gmsh() {
     std::cout << "DEBUG [initialize_gmsh]: Initializing GMSH..." << std::endl;
-    gmsh::initialize();
+    
+    // Check if GMSH is already initialized (from a crashed previous test)
+    bool was_initialized = gmsh::isInitialized();
+    if (was_initialized) {
+        std::cout << "DEBUG [initialize_gmsh]: GMSH already initialized, clearing state..." << std::endl;
+        gmsh::clear();  // Clear any leftover models
+    } else {
+        gmsh::initialize();
+    }
     
     // Disable GMSH's terminal output (except errors)
     // gmsh::option::setNumber("General.Terminal", 1);
@@ -55,10 +63,12 @@ std::shared_ptr<DGMesh> MeshCreator::create_rectangular_mesh(
     std::vector<std::string> existing_models;
     gmsh::model::list(existing_models);
     std::cout << "DEBUG [create_rectangular_mesh]: Found " << existing_models.size() << " existing models" << std::endl;
-    for (const auto& model_name : existing_models) {
-        std::cout << "DEBUG [create_rectangular_mesh]: Removing existing model: " << model_name << std::endl;
-        gmsh::model::setCurrent(model_name);
-        gmsh::model::remove();
+    
+    // Remove all models by clearing them, not by iterating (safer)
+    if (!existing_models.empty()) {
+        std::cout << "DEBUG [create_rectangular_mesh]: Clearing all GMSH models..." << std::endl;
+        gmsh::clear();
+        std::cout << "DEBUG [create_rectangular_mesh]: All models cleared" << std::endl;
     }
     
     // Create new model
@@ -105,10 +115,12 @@ std::shared_ptr<DGMesh> MeshCreator::create_euler_mesh(
     std::vector<std::string> existing_models;
     gmsh::model::list(existing_models);
     std::cout << "DEBUG [create_euler_mesh]: Found " << existing_models.size() << " existing models" << std::endl;
-    for (const auto& model_name : existing_models) {
-        std::cout << "DEBUG [create_euler_mesh]: Removing existing model: " << model_name << std::endl;
-        gmsh::model::setCurrent(model_name);
-        gmsh::model::remove();
+    
+    // Remove all models by clearing them, not by iterating (safer)
+    if (!existing_models.empty()) {
+        std::cout << "DEBUG [create_euler_mesh]: Clearing all GMSH models..." << std::endl;
+        gmsh::clear();
+        std::cout << "DEBUG [create_euler_mesh]: All models cleared" << std::endl;
     }
     
     // Create new model
