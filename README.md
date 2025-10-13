@@ -192,7 +192,9 @@ The Discontinuous Galerkin method combines features of finite element and finite
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please:
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+**Quick start:**
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -200,12 +202,6 @@ Contributions are welcome! Please:
 
    ```bash
    ./format-code.sh
-   ```
-
-   Or format a specific file:
-
-   ```bash
-   clang-format -i path/to/your/file.cpp
    ```
 
 4. Commit your changes (`git commit -m 'Add amazing feature'`)
