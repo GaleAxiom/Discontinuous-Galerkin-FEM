@@ -13,11 +13,34 @@
 namespace dgfem {
 
 void MeshCreator::initialize_gmsh() {
+    std::cout << "DEBUG [initialize_gmsh]: Initializing GMSH..." << std::endl;
     gmsh::initialize();
+    
+    // Disable GMSH's terminal output (except errors)
+    // gmsh::option::setNumber("General.Terminal", 1);
+    // gmsh::option::setNumber("General.Verbosity", 2);  // Errors only
+    
+    // Disable automatic file saving which might fail in CI
+    gmsh::option::setNumber("Mesh.SaveAll", 0);
+    gmsh::option::setNumber("Mesh.MshFileVersion", 2.2);
+    
+    // Ensure GMSH doesn't try to use GUI or graphics
+    gmsh::option::setNumber("General.GraphicsWidth", 0);
+    gmsh::option::setNumber("General.GraphicsHeight", 0);
+    
+    // Disable multithreading which can cause issues in CI
+    gmsh::option::setNumber("General.NumThreads", 1);
+    gmsh::option::setNumber("Mesh.MaxNumThreads1D", 1);
+    gmsh::option::setNumber("Mesh.MaxNumThreads2D", 1);
+    gmsh::option::setNumber("Mesh.MaxNumThreads3D", 1);
+    
+    std::cout << "DEBUG [initialize_gmsh]: GMSH initialized with CI-safe options (single-threaded)" << std::endl;
 }
 
 void MeshCreator::finalize_gmsh() {
+    std::cout << "DEBUG [finalize_gmsh]: Finalizing GMSH..." << std::endl;
     gmsh::finalize();
+    std::cout << "DEBUG [finalize_gmsh]: GMSH finalized" << std::endl;
 }
 
 std::shared_ptr<DGMesh> MeshCreator::create_rectangular_mesh(
@@ -26,6 +49,17 @@ std::shared_ptr<DGMesh> MeshCreator::create_rectangular_mesh(
     std::cout << "DEBUG [create_rectangular_mesh]: Entry - domain=[" << xmin << "," << xmax 
               << "] x [" << ymin << "," << ymax << "], dx=" << dx 
               << ", use_triangles=" << use_triangles << std::endl;
+    
+    // Remove any existing models to prevent conflicts
+    std::cout << "DEBUG [create_rectangular_mesh]: Clearing existing GMSH models..." << std::endl;
+    std::vector<std::string> existing_models;
+    gmsh::model::list(existing_models);
+    std::cout << "DEBUG [create_rectangular_mesh]: Found " << existing_models.size() << " existing models" << std::endl;
+    for (const auto& model_name : existing_models) {
+        std::cout << "DEBUG [create_rectangular_mesh]: Removing existing model: " << model_name << std::endl;
+        gmsh::model::setCurrent(model_name);
+        gmsh::model::remove();
+    }
     
     // Create new model
     std::cout << "DEBUG [create_rectangular_mesh]: Adding GMSH model 'rectangular_mesh'" << std::endl;
@@ -39,10 +73,18 @@ std::shared_ptr<DGMesh> MeshCreator::create_rectangular_mesh(
     std::cout << "DEBUG [create_rectangular_mesh]: Configuring mesh generation" << std::endl;
     configure_mesh_generation(use_triangles);
     
-    // Generate mesh
+    // Generate mesh with error handling
     std::cout << "DEBUG [create_rectangular_mesh]: Generating 2D mesh..." << std::endl;
-    gmsh::model::mesh::generate(2);
-    std::cout << "DEBUG [create_rectangular_mesh]: Mesh generation completed" << std::endl;
+    try {
+        gmsh::model::mesh::generate(2);
+        std::cout << "DEBUG [create_rectangular_mesh]: Mesh generation completed successfully" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "ERROR [create_rectangular_mesh]: GMSH mesh generation failed: " << e.what() << std::endl;
+        throw;
+    } catch (...) {
+        std::cerr << "ERROR [create_rectangular_mesh]: GMSH mesh generation failed with unknown exception" << std::endl;
+        throw std::runtime_error("GMSH mesh generation failed");
+    }
     
     // Create DGMesh from current model
     std::cout << "DEBUG [create_rectangular_mesh]: Creating DGMesh from GMSH model" << std::endl;
@@ -58,6 +100,17 @@ std::shared_ptr<DGMesh> MeshCreator::create_euler_mesh(
               << "] x [" << ymin << "," << ymax << "], dx=" << dx 
               << ", use_triangles=" << use_triangles << std::endl;
     
+    // Remove any existing models to prevent conflicts
+    std::cout << "DEBUG [create_euler_mesh]: Clearing existing GMSH models..." << std::endl;
+    std::vector<std::string> existing_models;
+    gmsh::model::list(existing_models);
+    std::cout << "DEBUG [create_euler_mesh]: Found " << existing_models.size() << " existing models" << std::endl;
+    for (const auto& model_name : existing_models) {
+        std::cout << "DEBUG [create_euler_mesh]: Removing existing model: " << model_name << std::endl;
+        gmsh::model::setCurrent(model_name);
+        gmsh::model::remove();
+    }
+    
     // Create new model
     std::cout << "DEBUG [create_euler_mesh]: Adding GMSH model 'euler_mesh'" << std::endl;
     gmsh::model::add("euler_mesh");
@@ -70,10 +123,18 @@ std::shared_ptr<DGMesh> MeshCreator::create_euler_mesh(
     std::cout << "DEBUG [create_euler_mesh]: Configuring mesh generation" << std::endl;
     configure_mesh_generation(use_triangles);
     
-    // Generate mesh
+    // Generate mesh with error handling
     std::cout << "DEBUG [create_euler_mesh]: Generating 2D mesh..." << std::endl;
-    gmsh::model::mesh::generate(2);
-    std::cout << "DEBUG [create_euler_mesh]: Mesh generation completed" << std::endl;
+    try {
+        gmsh::model::mesh::generate(2);
+        std::cout << "DEBUG [create_euler_mesh]: Mesh generation completed successfully" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "ERROR [create_euler_mesh]: GMSH mesh generation failed: " << e.what() << std::endl;
+        throw;
+    } catch (...) {
+        std::cerr << "ERROR [create_euler_mesh]: GMSH mesh generation failed with unknown exception" << std::endl;
+        throw std::runtime_error("GMSH mesh generation failed");
+    }
     
     // Create DGMesh from current model
     std::cout << "DEBUG [create_euler_mesh]: Creating DGMesh from GMSH model" << std::endl;
