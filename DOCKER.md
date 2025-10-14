@@ -21,6 +21,22 @@ The Docker image includes:
 - **Eigen3** linear algebra library
 - **Google Test** and **Google Mock** testing frameworks
 
+## Available Images
+
+The project provides multiple Docker image variants:
+
+- **Development** (`latest`, `dev`): Full development environment with all tools
+- **Production** (`prod`): Minimal image with only runtime dependencies
+- **Tagged versions** (`main-<sha>`): Specific commit versions for reproducibility
+
+```bash
+# Development (includes build tools, testing frameworks, static analyzers)
+docker pull ghcr.io/galeaxiom/discontinuous-galerkin-fem:latest
+
+# Production (minimal runtime environment)
+docker pull ghcr.io/galeaxiom/discontinuous-galerkin-fem:prod
+```
+
 ## Usage
 
 ### Local Development
@@ -42,25 +58,23 @@ cd build && ctest
 
 ### Using Docker Compose (Recommended)
 
-Create a `docker-compose.yml` file:
-
-```yaml
-version: '3.8'
-
-services:
-  dgfem:
-    image: ghcr.io/galeaxiom/discontinuous-galerkin-fem:latest
-    volumes:
-      - .:/workspace
-    working_dir: /workspace
-    command: /bin/bash
-```
-
-Then run:
+The project includes a `docker-compose.yml` file for easier development:
 
 ```bash
-docker-compose run --rm dgfem
+# Start development environment
+docker-compose up dev
+
+# Run tests
+docker-compose up test
+
+# Build production artifacts
+docker-compose up build
 ```
+
+**Docker Compose services:**
+- `dev`: Interactive development environment with hot-reload
+- `build`: Production build service
+- `test`: Automated test runner
 
 ### Building the Image Locally
 

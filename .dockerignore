@@ -4,20 +4,55 @@ build/
 *.o
 *.a
 *.so
+*.exe
 
 # Ignore output files
 output/
 *.vtk
+*.vtu
+*.pvtu
 
 # Ignore IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-*
 
 # Ignore git files
 .git/
 .gitignore
+.gitattributes
+.gitmodules
+
+# Ignore CI/CD
+.github/
 
 # Ignore macOS files
 .DS_Store
+._*
+
+# Ignore documentation generation
+docs/
+*.md
+!README.md
+
+# Ignore test artifacts
+Testing/
+CTestTestfile.cmake
+
+# Ignore coverage files
+*.gcda
+*.gcno
+*.gcov
+coverage.info
+coverage_html/
+
+# Ignore cache files
+.ccache/
+*.cache
+
+# Ignore temporary files
+*.tmp
+*.temp
+tmp/

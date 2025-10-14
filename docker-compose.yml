@@ -1,0 +1,60 @@
+services:
+  # Development environment with hot-reload
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: dgfem-dev
+    volumes:
+      - .:/workspace:cached
+      - build-cache:/workspace/build
+    working_dir: /workspace
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+    environment:
+      - CMAKE_BUILD_TYPE=Debug
+      - CCACHE_DIR=/workspace/.ccache
+
+  # Production build environment
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: dgfem-build
+    volumes:
+      - .:/workspace:ro
+      - build-output:/workspace/build
+    working_dir: /workspace
+    environment:
+      - CMAKE_BUILD_TYPE=Release
+    command: >
+      bash -c "
+        cmake -B build -S dgfem -DCMAKE_BUILD_TYPE=Release &&
+        cmake --build build --config Release -j$$(nproc)
+      "
+
+  # Test runner
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: dgfem-test
+    volumes:
+      - .:/workspace:cached
+    working_dir: /workspace
+    environment:
+      - CMAKE_BUILD_TYPE=Debug
+    command: >
+      bash -c "
+        cmake -B build -S dgfem -DCMAKE_BUILD_TYPE=Debug &&
+        cmake --build build --config Debug &&
+        cd build && ctest --output-on-failure
+      "
+
+volumes:
+  build-cache:
+  build-output:

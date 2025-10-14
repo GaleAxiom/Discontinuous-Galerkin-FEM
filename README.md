@@ -1,6 +1,11 @@
 # Discontinuous Galerkin Finite Element Method (DG-FEM)
 
 [![CMake Build](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/cmake-single-platform.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/cmake-single-platform.yml)
+[![Matrix Build](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/matrix-build.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/matrix-build.yml)
+[![Code Coverage](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/code-coverage.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/code-coverage.yml)
+[![Static Analysis](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/static-analysis.yml)
+[![Docker](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/docker-publish.yml)
+[![Security Scan](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/dependency-scan.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/dependency-scan.yml)
 
 A high-performance C++20 implementation of the Discontinuous Galerkin Finite Element Method for solving partial differential equations (PDEs).
 
@@ -187,7 +192,9 @@ The Discontinuous Galerkin method combines features of finite element and finite
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please:
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+**Quick start:**
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -195,12 +202,6 @@ Contributions are welcome! Please:
 
    ```bash
    ./format-code.sh
-   ```
-
-   Or format a specific file:
-
-   ```bash
-   clang-format -i path/to/your/file.cpp
    ```
 
 4. Commit your changes (`git commit -m 'Add amazing feature'`)
@@ -218,6 +219,8 @@ This project uses `clang-format` to ensure consistent code formatting. The confi
 - **Naming**: Snake_case for variables, PascalCase for classes
 
 The CI pipeline automatically checks code formatting. Make sure to run `./format-code.sh` before committing!
+
+For more details, see [CODE_STYLE.md](CODE_STYLE.md) and [CI_CD.md](CI_CD.md).
 
 ## 📄 License
 

@@ -1,4 +1,55 @@
+# Build artifacts
 dgfem/build/*
+build/*
+*.o
+*.a
+*.so
+*.exe
+*.out
+
+# Output files
 output/*
 *.vtk
-build/*
+*.vtu
+*.pvtu
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-*
+.vs/
+
+# macOS files
+.DS_Store
+._*
+
+# Coverage files
+*.gcda
+*.gcno
+*.gcov
+coverage.info
+coverage_html/
+.coverage
+
+# Documentation
+docs/html/
+docs/latex/
+Doxyfile.bak
+
+# Cache files
+.ccache/
+*.cache
+CMakeCache.txt
+CMakeFiles/
+
+# Test artifacts
+Testing/
+CTestTestfile.cmake
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+.tmp/
