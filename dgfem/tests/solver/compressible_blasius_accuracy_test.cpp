@@ -1,18 +1,20 @@
-#include <gtest/gtest.h>
-#include <dgfem/solver/dg_solver.hpp>
-#include <dgfem/boundary/conditions.hpp>
-#include <dgfem/utils/mesh_creation.hpp>
-#include <dgfem/core/space.hpp>
-#include <dgfem/solver/weak_form.hpp>
 #include <Eigen/Dense>
+#include <cmath>
+#include <dgfem/boundary/conditions.hpp>
+#include <dgfem/core/space.hpp>
+#include <dgfem/solver/dg_solver.hpp>
+#include <dgfem/solver/weak_form.hpp>
+#include <dgfem/utils/mesh_creation.hpp>
+#include <dgfem/utils/vtk_writer.hpp>
+#include <filesystem>
+
 #include <algorithm>
 #include <array>
-#include <cmath>
-#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <vector>
-#include <dgfem/utils/vtk_writer.hpp>
+
+#include <gtest/gtest.h>
 
 using namespace dgfem;
 
@@ -54,18 +56,11 @@ BlasiusTable build_blasius_table() {
 
         // RK4 step
         auto k1 = deriv(f, fp, fpp);
-        auto k2 = deriv(
-            f + 0.5 * d_eta * k1[0],
-            fp + 0.5 * d_eta * k1[1],
-            fpp + 0.5 * d_eta * k1[2]);
-        auto k3 = deriv(
-            f + 0.5 * d_eta * k2[0],
-            fp + 0.5 * d_eta * k2[1],
-            fpp + 0.5 * d_eta * k2[2]);
-        auto k4 = deriv(
-            f + d_eta * k3[0],
-            fp + d_eta * k3[1],
-            fpp + d_eta * k3[2]);
+        auto k2 =
+            deriv(f + 0.5 * d_eta * k1[0], fp + 0.5 * d_eta * k1[1], fpp + 0.5 * d_eta * k1[2]);
+        auto k3 =
+            deriv(f + 0.5 * d_eta * k2[0], fp + 0.5 * d_eta * k2[1], fpp + 0.5 * d_eta * k2[2]);
+        auto k4 = deriv(f + d_eta * k3[0], fp + d_eta * k3[1], fpp + d_eta * k3[2]);
 
         f += (d_eta / 6.0) * (k1[0] + 2.0 * k2[0] + 2.0 * k3[0] + k4[0]);
         fp += (d_eta / 6.0) * (k1[1] + 2.0 * k2[1] + 2.0 * k3[1] + k4[1]);
@@ -151,8 +146,7 @@ struct CompressibleBlasiusAnalytic {
 
 [[nodiscard]] double compute_variable_error(const std::shared_ptr<DGMesh>& mesh,
                                             const Eigen::MatrixXd& numerical_sol,
-                                            const CompressibleBlasiusAnalytic& exact,
-                                            double gamma,
+                                            const CompressibleBlasiusAnalytic& exact, double gamma,
                                             int var_idx) {
     auto space = mesh->get_dg_space();
     auto mapping = space->get_mapping();
@@ -199,17 +193,13 @@ struct CompressibleBlasiusAnalytic {
     return std::sqrt(error_sq / norm_sq);
 }
 
-} // namespace
+}  // namespace
 
 class NavierStokesBlasiusAccuracyTest : public ::testing::Test {
 protected:
-    void SetUp() override {
-        MeshCreator::initialize_gmsh();
-    }
+    void SetUp() override { MeshCreator::initialize_gmsh(); }
 
-    void TearDown() override {
-        MeshCreator::finalize_gmsh();
-    }
+    void TearDown() override { MeshCreator::finalize_gmsh(); }
 };
 
 TEST_F(NavierStokesBlasiusAccuracyTest, MaintainsCompressibleBlasiusProfile) {
@@ -223,8 +213,7 @@ TEST_F(NavierStokesBlasiusAccuracyTest, MaintainsCompressibleBlasiusProfile) {
     constexpr double p_inf = 1.0;
     constexpr double x_min = 0.05;
 
-    CompressibleBlasiusAnalytic exact{
-        gamma, mu, prandtl, mach_inf, T_inf, T_wall, p_inf, x_min};
+    CompressibleBlasiusAnalytic exact{gamma, mu, prandtl, mach_inf, T_inf, T_wall, p_inf, x_min};
 
     constexpr double dx = 0.02;
     constexpr int order = 2;
@@ -234,8 +223,7 @@ TEST_F(NavierStokesBlasiusAccuracyTest, MaintainsCompressibleBlasiusProfile) {
     mesh->initialize_dg_space(space, 4);
 
     auto blasius_bc = std::make_shared<BoundaryConditionEuler>(
-        BCTypeEuler::FAR_FIELD,
-        [exact](const Eigen::Vector2d& x) { return exact.conserved(x); });
+        BCTypeEuler::FAR_FIELD, [exact](const Eigen::Vector2d& x) { return exact.conserved(x); });
 
     for (const auto& [name, _] : mesh->get_boundary_tags()) {
         mesh->set_boundary_condition_euler(name, blasius_bc);
@@ -250,11 +238,8 @@ TEST_F(NavierStokesBlasiusAccuracyTest, MaintainsCompressibleBlasiusProfile) {
     constexpr int save_every = 50;
 
     NavierStokesDGSolver solver(mesh, gamma, mu, prandtl, penalty);
-    auto frames = solver.solve(
-        [exact](const Eigen::Vector2d& x) { return exact.conserved(x); },
-        T_final,
-        dt,
-        save_every);
+    auto frames = solver.solve([exact](const Eigen::Vector2d& x) { return exact.conserved(x); },
+                               T_final, dt, save_every);
 
     ASSERT_FALSE(frames.empty());
     const auto& final_frame = frames.back();

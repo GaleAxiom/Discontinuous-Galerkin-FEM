@@ -10,4 +10,4 @@ namespace dgfem {
 // The singleton instance is defined in the header using static local variable
 // No additional implementation needed for the singleton pattern
 
-} // namespace dgfem
+}  // namespace dgfem

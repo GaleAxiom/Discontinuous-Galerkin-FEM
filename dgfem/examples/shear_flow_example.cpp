@@ -10,13 +10,15 @@
  * metrics against the analytic profile.
  */
 
-#include "dgfem/utils/example_helpers.hpp"
-#include "dgfem/solver/dg_solver.hpp"
 #include "dgfem/boundary/conditions.hpp"
+#include "dgfem/solver/dg_solver.hpp"
+#include "dgfem/utils/example_helpers.hpp"
 #include "dgfem/utils/vtk_writer.hpp"
-#include <array>
+
 #include <cmath>
 #include <filesystem>
+
+#include <array>
 #include <iomanip>
 #include <iostream>
 
@@ -43,10 +45,8 @@ struct ShearFlowAnalytic {
  * @brief Compute an L2-like error for a primitive variable against the analytic state.
  */
 double compute_variable_error(const std::shared_ptr<dgfem::DGMesh>& mesh,
-                              const Eigen::MatrixXd& numerical_sol,
-                              const ShearFlowAnalytic& exact,
-                              double gamma,
-                              int var_idx) {
+                              const Eigen::MatrixXd& numerical_sol, const ShearFlowAnalytic& exact,
+                              double gamma, int var_idx) {
     auto space = mesh->get_dg_space();
     auto mapping = space->get_mapping();
     const auto& phi = space->get_volume_basis_values();
@@ -92,7 +92,7 @@ double compute_variable_error(const std::shared_ptr<dgfem::DGMesh>& mesh,
     return std::sqrt(error_sq / norm_sq);
 }
 
-} // namespace
+}  // namespace
 
 int main() {
     try {
@@ -140,11 +140,9 @@ int main() {
 
         dgfem::Timer solve_timer("Shear flow solve");
         dgfem::NavierStokesDGSolver solver(mesh, gamma, mu, prandtl, penalty);
-        auto solutions = solver.solve(
-            [exact](const Eigen::Vector2d& x) { return exact.conserved(x); },
-            T_final,
-            dt,
-            save_every);
+        auto solutions =
+            solver.solve([exact](const Eigen::Vector2d& x) { return exact.conserved(x); }, T_final,
+                         dt, save_every);
 
         if (solutions.empty()) {
             throw std::runtime_error("Navier-Stokes solver did not return any solution frames.");
@@ -156,8 +154,8 @@ int main() {
         std::cout << "\n--- L2 relative errors vs analytic profile ---" << std::endl;
         for (int v = 0; v < 4; ++v) {
             double err = compute_variable_error(mesh, final_sol, exact, gamma, v);
-            std::cout << "  " << std::setw(3) << var_names[v] << ": "
-                      << std::scientific << std::setprecision(4) << err << std::endl;
+            std::cout << "  " << std::setw(3) << var_names[v] << ": " << std::scientific
+                      << std::setprecision(4) << err << std::endl;
         }
 
         std::cout << "\n--- Exporting " << solutions.size() << " frames to VTK ---" << std::endl;
@@ -171,12 +169,8 @@ int main() {
 
         for (size_t i = 0; i < solutions.size(); ++i) {
             auto filename = (output_dir / ("shear_flow_" + std::to_string(i))).string();
-            dgfem::VTKWriter::write_euler_solution(
-                mesh,
-                solutions[i],
-                filename,
-                gamma,
-                /*refinement=*/1);
+            dgfem::VTKWriter::write_euler_solution(mesh, solutions[i], filename, gamma,
+                                                   /*refinement=*/1);
             if (i % 5 == 0 || i == solutions.size() - 1) {
                 std::cout << "  Frame " << i << "/" << solutions.size() - 1 << std::endl;
             }

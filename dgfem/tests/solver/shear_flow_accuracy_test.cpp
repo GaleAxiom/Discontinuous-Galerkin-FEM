@@ -1,13 +1,15 @@
-#include <gtest/gtest.h>
-#include <dgfem/solver/dg_solver.hpp>
-#include <dgfem/boundary/conditions.hpp>
-#include <dgfem/utils/mesh_creation.hpp>
-#include <dgfem/core/space.hpp>
-#include <dgfem/solver/weak_form.hpp>
 #include <Eigen/Dense>
-#include <array>
 #include <cmath>
+#include <dgfem/boundary/conditions.hpp>
+#include <dgfem/core/space.hpp>
+#include <dgfem/solver/dg_solver.hpp>
+#include <dgfem/solver/weak_form.hpp>
+#include <dgfem/utils/mesh_creation.hpp>
+
+#include <array>
 #include <memory>
+
+#include <gtest/gtest.h>
 
 using namespace dgfem;
 
@@ -29,8 +31,7 @@ struct ShearFlowAnalytic {
 
 [[nodiscard]] double compute_variable_error(const std::shared_ptr<DGMesh>& mesh,
                                             const Eigen::MatrixXd& numerical_sol,
-                                            const ShearFlowAnalytic& exact,
-                                            double gamma,
+                                            const ShearFlowAnalytic& exact, double gamma,
                                             int var_idx) {
     auto space = mesh->get_dg_space();
     auto mapping = space->get_mapping();
@@ -77,17 +78,13 @@ struct ShearFlowAnalytic {
     return std::sqrt(error_sq / norm_sq);
 }
 
-} // namespace
+}  // namespace
 
 class NavierStokesShearFlowAccuracyTest : public ::testing::Test {
 protected:
-    void SetUp() override {
-        MeshCreator::initialize_gmsh();
-    }
+    void SetUp() override { MeshCreator::initialize_gmsh(); }
 
-    void TearDown() override {
-        MeshCreator::finalize_gmsh();
-    }
+    void TearDown() override { MeshCreator::finalize_gmsh(); }
 };
 
 TEST_F(NavierStokesShearFlowAccuracyTest, MaintainsManufacturedShearProfile) {
@@ -106,8 +103,7 @@ TEST_F(NavierStokesShearFlowAccuracyTest, MaintainsManufacturedShearProfile) {
     ShearFlowAnalytic exact{gamma};
 
     auto shear_bc = std::make_shared<BoundaryConditionEuler>(
-        BCTypeEuler::FAR_FIELD,
-        [exact](const Eigen::Vector2d& x) { return exact.conserved(x); });
+        BCTypeEuler::FAR_FIELD, [exact](const Eigen::Vector2d& x) { return exact.conserved(x); });
 
     for (const auto& [name, _] : mesh->get_boundary_tags()) {
         mesh->set_boundary_condition_euler(name, shear_bc);
@@ -122,11 +118,8 @@ TEST_F(NavierStokesShearFlowAccuracyTest, MaintainsManufacturedShearProfile) {
     constexpr int save_every = 50;
 
     NavierStokesDGSolver solver(mesh, gamma, mu, prandtl, penalty);
-    auto frames = solver.solve(
-        [exact](const Eigen::Vector2d& x) { return exact.conserved(x); },
-        T_final,
-        dt,
-        save_every);
+    auto frames = solver.solve([exact](const Eigen::Vector2d& x) { return exact.conserved(x); },
+                               T_final, dt, save_every);
 
     ASSERT_FALSE(frames.empty());
     const auto& final_frame = frames.back();

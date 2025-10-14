@@ -1,14 +1,16 @@
-#include <gtest/gtest.h>
-#include <gmock/gmock.h>
-
-#include <dgfem/solver/weak_form.hpp>
-#include <dgfem/solver/dg_solver.hpp>
-#include <dgfem/core/space.hpp>
-#include <dgfem/core/mesh.hpp>
 #include <dgfem/boundary/conditions.hpp>
-#include "test_helpers.h"
+#include <dgfem/core/mesh.hpp>
+#include <dgfem/core/space.hpp>
+#include <dgfem/solver/dg_solver.hpp>
+#include <dgfem/solver/weak_form.hpp>
+
 #include <array>
 #include <stdexcept>
+
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
+#include "test_helpers.h"
 
 using namespace dgfem;
 using namespace testing;
@@ -37,7 +39,8 @@ std::shared_ptr<BoundaryConditionEuler> make_no_slip_bc(double rho, double p) {
     return std::make_shared<BoundaryConditionEuler>(BCTypeEuler::NO_SLIP_WALL, primitive);
 }
 
-void set_all_boundaries(std::shared_ptr<DGMesh> mesh, const std::shared_ptr<BoundaryConditionEuler>& bc) {
+void set_all_boundaries(std::shared_ptr<DGMesh> mesh,
+                        const std::shared_ptr<BoundaryConditionEuler>& bc) {
     for (const auto& [name, _] : mesh->get_boundary_tags()) {
         mesh->set_boundary_condition_euler(name, bc);
     }
@@ -54,8 +57,8 @@ struct AnalyticViscousFlux {
     double mu;
     double prandtl;
 
-    std::pair<Eigen::Vector4d, Eigen::Vector4d> operator()(const Eigen::Vector4d& U,
-                                                           const Eigen::Matrix<double, 4, 2>& grad_U) const {
+    std::pair<Eigen::Vector4d, Eigen::Vector4d>
+    operator()(const Eigen::Vector4d& U, const Eigen::Matrix<double, 4, 2>& grad_U) const {
         constexpr double gas_constant = 1.0;
         double rho = U[0];
         double rho_safe = std::max(rho, 1e-12);
@@ -77,13 +80,14 @@ struct AnalyticViscousFlux {
 
         double kinetic_sq = u * u + v * v;
         Eigen::Vector2d grad_velocity_norm = 2.0 * u * grad_u + 2.0 * v * grad_v;
-        (void)grad_velocity_norm; // Not used explicitly
+        (void)grad_velocity_norm;  // Not used explicitly
         Eigen::Vector2d momentum_term = rho_p * (u * grad_u + v * grad_v);
-        Eigen::Vector2d grad_p = (gamma - 1.0) * (grad_E - 0.5 * kinetic_sq * grad_rho - momentum_term);
+        Eigen::Vector2d grad_p =
+            (gamma - 1.0) * (grad_E - 0.5 * kinetic_sq * grad_rho - momentum_term);
 
         double rho_sq = std::max(rho_p * rho_p, 1e-24);
         double temperature = p / (rho_p * gas_constant);
-        (void)temperature; // Only kept for completeness
+        (void)temperature;  // Only kept for completeness
         Eigen::Vector2d grad_T = (rho_p * grad_p - p * grad_rho) / (rho_sq * gas_constant);
 
         double divergence = grad_u[0] + grad_v[1];
@@ -168,7 +172,7 @@ ShearFlowSetup make_shear_flow_setup(double gamma) {
     return setup;
 }
 
-} // namespace
+}  // namespace
 
 TEST(NavierStokesWeakFormulationTest, Construction) {
     EXPECT_NO_THROW(NavierStokesWeakFormulation weak_form(1.4, 1.0e-3, 0.72, 5.0));
@@ -214,7 +218,8 @@ TEST(NavierStokesWeakFormulationTest, UniformFlowHasZeroResidual) {
 
     for (int elem = 0; elem < n_elements; ++elem) {
         const auto& elem_data = mesh->get_element_data(elem);
-        Eigen::MatrixXd R_vol = weak_form->viscous_volume_residual(u_coeffs[elem], elem_data, space);
+        Eigen::MatrixXd R_vol =
+            weak_form->viscous_volume_residual(u_coeffs[elem], elem_data, space);
         for (int i = 0; i < R_vol.rows(); ++i) {
             for (int j = 0; j < R_vol.cols(); ++j) {
                 EXPECT_NEAR(R_vol(i, j), 0.0, 1e-12);
@@ -227,8 +232,8 @@ TEST(NavierStokesWeakFormulationTest, UniformFlowHasZeroResidual) {
         const auto& face_data_L = mesh->get_element_face_data(face.elem_L, face.face_L);
         const auto& face_data_R = mesh->get_element_face_data(face.elem_R, face.face_R);
         auto [R_L, R_R] = weak_form->viscous_interior_face_residual(
-            u_coeffs[face.elem_L], u_coeffs[face.elem_R],
-            face_data_L, face_data_R, space, face.permutation);
+            u_coeffs[face.elem_L], u_coeffs[face.elem_R], face_data_L, face_data_R, space,
+            face.permutation);
         for (int i = 0; i < R_L.rows(); ++i) {
             for (int j = 0; j < R_L.cols(); ++j) {
                 EXPECT_NEAR(R_L(i, j), 0.0, 1e-12);
@@ -240,8 +245,8 @@ TEST(NavierStokesWeakFormulationTest, UniformFlowHasZeroResidual) {
     // Boundary faces
     for (const auto& face : mesh->get_boundary_face_data()) {
         const auto& face_data = mesh->get_element_face_data(face.elem_L, face.face_L);
-        auto R_bc = weak_form->viscous_boundary_face_residual(
-            u_coeffs[face.elem_L], face_data, face.bc_euler, space);
+        auto R_bc = weak_form->viscous_boundary_face_residual(u_coeffs[face.elem_L], face_data,
+                                                              face.bc_euler, space);
         for (int i = 0; i < R_bc.rows(); ++i) {
             for (int j = 0; j < R_bc.cols(); ++j) {
                 EXPECT_NEAR(R_bc(i, j), 0.0, 1e-12);
@@ -267,7 +272,8 @@ TEST(NavierStokesWeakFormulationTest, ShearFlowVolumeResidualMatchesAnalytic) {
     auto weak_form = std::make_shared<NavierStokesWeakFormulation>(gamma, mu, prandtl, 5.0);
     for (int elem = 0; elem < mesh->get_n_elements(); ++elem) {
         const auto& elem_data = mesh->get_element_data(elem);
-        Eigen::MatrixXd computed = weak_form->viscous_volume_residual(u_coeffs[elem], elem_data, space);
+        Eigen::MatrixXd computed =
+            weak_form->viscous_volume_residual(u_coeffs[elem], elem_data, space);
 
         Eigen::MatrixXd expected = Eigen::MatrixXd::Zero(n_basis, 4);
         const Eigen::VectorXd& J_det = elem_data.at("J_det_vol");
@@ -330,8 +336,8 @@ TEST(NavierStokesWeakFormulationTest, ShearFlowInteriorFaceResidualMatchesAnalyt
     const auto& face_data_R = mesh->get_element_face_data(face.elem_R, face.face_R);
 
     auto [computed_L, computed_R] = weak_form->viscous_interior_face_residual(
-        u_coeffs[face.elem_L], u_coeffs[face.elem_R],
-        face_data_L, face_data_R, space, face.permutation);
+        u_coeffs[face.elem_L], u_coeffs[face.elem_R], face_data_L, face_data_R, space,
+        face.permutation);
 
     Eigen::MatrixXd expected_L = Eigen::MatrixXd::Zero(computed_L.rows(), computed_L.cols());
     Eigen::MatrixXd expected_R = Eigen::MatrixXd::Zero(computed_R.rows(), computed_R.cols());
@@ -402,8 +408,8 @@ TEST(NavierStokesWeakFormulationTest, ShearFlowBoundaryFaceResidualMatchesAnalyt
     auto mesh = setup.mesh;
     auto space = setup.space;
     const auto& u_coeffs = setup.u_coeffs;
-    auto shear_bc = std::make_shared<BoundaryConditionEuler>(BCTypeEuler::FAR_FIELD,
-        [gamma](const Eigen::Vector2d& x) {
+    auto shear_bc = std::make_shared<BoundaryConditionEuler>(
+        BCTypeEuler::FAR_FIELD, [gamma](const Eigen::Vector2d& x) {
             Eigen::Vector4d primitive;
             primitive << 1.0, x[1], 0.0, 1.0;
             return primitive_to_conserved(primitive, gamma);
@@ -418,8 +424,8 @@ TEST(NavierStokesWeakFormulationTest, ShearFlowBoundaryFaceResidualMatchesAnalyt
 
     for (const auto& face : boundary_faces) {
         const auto& face_data = mesh->get_element_face_data(face.elem_L, face.face_L);
-        auto computed = weak_form->viscous_boundary_face_residual(
-            u_coeffs[face.elem_L], face_data, face.bc_euler, space);
+        auto computed = weak_form->viscous_boundary_face_residual(u_coeffs[face.elem_L], face_data,
+                                                                  face.bc_euler, space);
 
         Eigen::MatrixXd expected = Eigen::MatrixXd::Zero(computed.rows(), computed.cols());
         const Eigen::VectorXd weights = face_data.at("weights").col(0);
@@ -465,15 +471,15 @@ TEST(NavierStokesWeakFormulationTest, ShearFlowBoundaryFaceResidualMatchesAnalyt
             if (bc_ptr) {
                 Eigen::Vector4d bc_data = bc_ptr->evaluate(x_q);
                 switch (bc_ptr->get_type()) {
-                    case BCTypeEuler::NO_SLIP_WALL:
-                        U_bc = primitive_to_conserved(bc_data, gamma);
-                        break;
-                    case BCTypeEuler::FAR_FIELD:
-                    case BCTypeEuler::SLIP_WALL:
-                    case BCTypeEuler::PERIODIC:
-                    default:
-                        U_bc = bc_data;
-                        break;
+                case BCTypeEuler::NO_SLIP_WALL:
+                    U_bc = primitive_to_conserved(bc_data, gamma);
+                    break;
+                case BCTypeEuler::FAR_FIELD:
+                case BCTypeEuler::SLIP_WALL:
+                case BCTypeEuler::PERIODIC:
+                default:
+                    U_bc = bc_data;
+                    break;
                 }
             }
             Eigen::Vector4d penalty = sigma * (U_bc - U_L_q);
