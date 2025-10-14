@@ -4,39 +4,38 @@
  */
 
 #include "dgfem/weak_forms/navier_stokes_weak_formulation.hpp"
+
 #include "dgfem/core/space.hpp"
-#include <algorithm>
-#include <stdexcept>
+
 #include <cmath>
+
+#include <algorithm>
 #include <iostream>
+#include <stdexcept>
 
 namespace dgfem {
 
-NavierStokesWeakFormulation::NavierStokesWeakFormulation(double gamma,
-                                                         double dynamic_viscosity,
-                                                         double prandtl,
-                                                         double penalty_prefactor)
-    : EulerWeakFormulation(gamma),
-      mu_(dynamic_viscosity),
-      prandtl_(prandtl),
-      sigma0_(penalty_prefactor),
-      gas_constant_(1.0) {
+NavierStokesWeakFormulation::NavierStokesWeakFormulation(double gamma, double dynamic_viscosity,
+                                                         double prandtl, double penalty_prefactor)
+    : EulerWeakFormulation(gamma), mu_(dynamic_viscosity), prandtl_(prandtl),
+      sigma0_(penalty_prefactor), gas_constant_(1.0) {
     if (mu_ <= 0.0) {
-        throw std::invalid_argument("Dynamic viscosity must be positive for Navier-Stokes weak formulation");
+        throw std::invalid_argument(
+            "Dynamic viscosity must be positive for Navier-Stokes weak formulation");
     }
     if (prandtl_ <= 0.0) {
-        throw std::invalid_argument("Prandtl number must be positive for Navier-Stokes weak formulation");
+        throw std::invalid_argument(
+            "Prandtl number must be positive for Navier-Stokes weak formulation");
     }
     if (sigma0_ <= 0.0) {
-        throw std::invalid_argument("Penalty prefactor must be positive for Navier-Stokes weak formulation");
+        throw std::invalid_argument(
+            "Penalty prefactor must be positive for Navier-Stokes weak formulation");
     }
 }
 
 NavierStokesWeakFormulation::PrimitiveGradientData
 NavierStokesWeakFormulation::compute_primitive_gradients(
-    const Eigen::Vector4d& U,
-    const Eigen::Matrix<double, 4, 2>& grad_U) const {
-
+    const Eigen::Vector4d& U, const Eigen::Matrix<double, 4, 2>& grad_U) const {
     PrimitiveGradientData data;
     double rho = U[0];
     double rho_safe = std::max(rho, 1e-12);
@@ -59,7 +58,8 @@ NavierStokesWeakFormulation::compute_primitive_gradients(
     double kinetic_sq = data.u * data.u + data.v * data.v;
     Eigen::Vector2d grad_velocity_norm = 2.0 * data.u * data.grad_u + 2.0 * data.v * data.grad_v;
     Eigen::Vector2d momentum_term = data.rho * (data.u * data.grad_u + data.v * data.grad_v);
-    Eigen::Vector2d grad_p = (get_gamma() - 1.0) * (grad_E - 0.5 * kinetic_sq * data.grad_rho - momentum_term);
+    Eigen::Vector2d grad_p =
+        (get_gamma() - 1.0) * (grad_E - 0.5 * kinetic_sq * data.grad_rho - momentum_term);
 
     double rho_sq = data.rho * data.rho;
     data.temperature = data.p / (data.rho * gas_constant_);
@@ -79,11 +79,8 @@ NavierStokesWeakFormulation::compute_primitive_gradients(
     return data;
 }
 
-std::pair<Eigen::Vector4d, Eigen::Vector4d>
-NavierStokesWeakFormulation::compute_viscous_fluxes(
-    const Eigen::Vector4d& U,
-    const Eigen::Matrix<double, 4, 2>& grad_U) const {
-
+std::pair<Eigen::Vector4d, Eigen::Vector4d> NavierStokesWeakFormulation::compute_viscous_fluxes(
+    const Eigen::Vector4d& U, const Eigen::Matrix<double, 4, 2>& grad_U) const {
     PrimitiveGradientData data = compute_primitive_gradients(U, grad_U);
 
     Eigen::Vector4d Fv = Eigen::Vector4d::Zero();
@@ -101,10 +98,8 @@ NavierStokesWeakFormulation::compute_viscous_fluxes(
 }
 
 Eigen::MatrixXd NavierStokesWeakFormulation::viscous_volume_residual(
-    const Eigen::MatrixXd& u_coeffs_elem,
-    const std::map<std::string, Eigen::MatrixXd>& elem_data,
+    const Eigen::MatrixXd& u_coeffs_elem, const std::map<std::string, Eigen::MatrixXd>& elem_data,
     std::shared_ptr<DGSpace> dg_space) const {
-
     int n_basis = dg_space->get_basis()->get_n_basis();
     Eigen::MatrixXd R_visc = Eigen::MatrixXd::Zero(n_basis, get_n_vars());
 
@@ -146,13 +141,10 @@ Eigen::MatrixXd NavierStokesWeakFormulation::viscous_volume_residual(
 
 std::tuple<Eigen::MatrixXd, Eigen::MatrixXd>
 NavierStokesWeakFormulation::viscous_interior_face_residual(
-    const Eigen::MatrixXd& u_coeffs_L,
-    const Eigen::MatrixXd& u_coeffs_R,
+    const Eigen::MatrixXd& u_coeffs_L, const Eigen::MatrixXd& u_coeffs_R,
     const std::map<std::string, Eigen::MatrixXd>& face_data_L,
-    const std::map<std::string, Eigen::MatrixXd>& face_data_R,
-    std::shared_ptr<DGSpace> dg_space,
+    const std::map<std::string, Eigen::MatrixXd>& face_data_R, std::shared_ptr<DGSpace> dg_space,
     const Eigen::VectorXi& permutation) const {
-
     int n_basis = dg_space->get_basis()->get_n_basis();
     Eigen::MatrixXd R_face_L = Eigen::MatrixXd::Zero(n_basis, get_n_vars());
     Eigen::MatrixXd R_face_R = Eigen::MatrixXd::Zero(n_basis, get_n_vars());
@@ -215,11 +207,8 @@ NavierStokesWeakFormulation::viscous_interior_face_residual(
 }
 
 Eigen::MatrixXd NavierStokesWeakFormulation::viscous_boundary_face_residual(
-    const Eigen::MatrixXd& u_coeffs,
-    const std::map<std::string, Eigen::MatrixXd>& face_data,
-    std::shared_ptr<BoundaryConditionEuler> bc,
-    std::shared_ptr<DGSpace> dg_space) const {
-
+    const Eigen::MatrixXd& u_coeffs, const std::map<std::string, Eigen::MatrixXd>& face_data,
+    std::shared_ptr<BoundaryConditionEuler> bc, std::shared_ptr<DGSpace> dg_space) const {
     int n_basis = dg_space->get_basis()->get_n_basis();
     Eigen::MatrixXd R_face = Eigen::MatrixXd::Zero(n_basis, get_n_vars());
 
@@ -259,15 +248,15 @@ Eigen::MatrixXd NavierStokesWeakFormulation::viscous_boundary_face_residual(
 
             Eigen::Vector4d bc_data = bc->evaluate(x_q);
             switch (bc->get_type()) {
-                case BCTypeEuler::NO_SLIP_WALL:
-                    U_bc = primitive_to_conserved(bc_data, get_gamma());
-                    break;
-                case BCTypeEuler::FAR_FIELD:
-                case BCTypeEuler::SLIP_WALL:
-                case BCTypeEuler::PERIODIC:
-                default:
-                    U_bc = bc_data;
-                    break;
+            case BCTypeEuler::NO_SLIP_WALL:
+                U_bc = primitive_to_conserved(bc_data, get_gamma());
+                break;
+            case BCTypeEuler::FAR_FIELD:
+            case BCTypeEuler::SLIP_WALL:
+            case BCTypeEuler::PERIODIC:
+            default:
+                U_bc = bc_data;
+                break;
             }
         }
 
@@ -288,4 +277,4 @@ double NavierStokesWeakFormulation::compute_penalty_parameter(int p, double h) c
     return sigma0_ * mu_ * (p + 1) * (p + 1) / h_safe;
 }
 
-} // namespace dgfem
+}  // namespace dgfem

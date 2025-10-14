@@ -128,9 +128,6 @@ PenaltyExcessCharacter: 1000000
 PenaltyReturnTypeOnItsOwnLine: 60
 PenaltyIndentedWhitespace: 0
 
-# Preprocessor
-IndentPPDirectives: None
-
 # Template formatting
 AlwaysBreakTemplateDeclarations: Yes
 

@@ -4,12 +4,14 @@
  */
 
 #include "dgfem/basis/dubiner.hpp"
+
 #include "dgfem/reference/elements.hpp"
+
 #include <cmath>
 
 namespace dgfem {
 
-DubinerBasis::DubinerBasis(int order) 
+DubinerBasis::DubinerBasis(int order)
     : OrthogonalBasis(std::make_shared<ReferenceTriangle>(), order) {
     // Set n_basis_ after construction
     n_basis_ = compute_n_basis();
@@ -20,29 +22,33 @@ int DubinerBasis::compute_n_basis() const {
 }
 
 double DubinerBasis::jacobi_polynomial(int n, double alpha, double beta, double x) const {
-    if (n == 0) return 1.0;
-    if (n == 1) return 0.5 * (alpha - beta + (alpha + beta + 2.0) * x);
-    
+    if (n == 0)
+        return 1.0;
+    if (n == 1)
+        return 0.5 * (alpha - beta + (alpha + beta + 2.0) * x);
+
     // Use recurrence relation for Jacobi polynomials
     double P_nm1 = 1.0;
     double P_n = 0.5 * (alpha - beta + (alpha + beta + 2.0) * x);
-    
+
     for (int k = 2; k <= n; ++k) {
         double a1 = 2.0 * k * (k + alpha + beta) * (2.0 * k + alpha + beta - 2.0);
         double a2 = (2.0 * k + alpha + beta - 1.0) * (alpha * alpha - beta * beta);
-        double a3 = (2.0 * k + alpha + beta - 2.0) * (2.0 * k + alpha + beta - 1.0) * (2.0 * k + alpha + beta);
+        double a3 = (2.0 * k + alpha + beta - 2.0) * (2.0 * k + alpha + beta - 1.0) *
+                    (2.0 * k + alpha + beta);
         double a4 = 2.0 * (k + alpha - 1.0) * (k + beta - 1.0) * (2.0 * k + alpha + beta);
-        
+
         double P_np1 = ((a2 + a3 * x) * P_n - a4 * P_nm1) / a1;
         P_nm1 = P_n;
         P_n = P_np1;
     }
-    
+
     return P_n;
 }
 
 double DubinerBasis::jacobi_derivative(int n, double alpha, double beta, double x) const {
-    if (n == 0) return 0.0;
+    if (n == 0)
+        return 0.0;
     return 0.5 * (n + alpha + beta + 1.0) * jacobi_polynomial(n - 1, alpha + 1.0, beta + 1.0, x);
 }
 
@@ -80,7 +86,7 @@ std::pair<int, int> DubinerBasis::get_dubiner_indices(int basis_idx) const {
             ++idx;
         }
     }
-    return {0, 0}; // Should never reach here
+    return {0, 0};  // Should never reach here
 }
 
 Eigen::VectorXd DubinerBasis::evaluate(const Eigen::Vector2d& xi) const {
@@ -90,22 +96,22 @@ Eigen::VectorXd DubinerBasis::evaluate(const Eigen::Vector2d& xi) const {
     }
 
     Eigen::VectorXd phi(n_basis_);
-    
+
     auto [r, s] = transform_coordinates(xi_eval);
-    
+
     for (int idx = 0; idx < n_basis_; ++idx) {
         auto [i, j] = get_dubiner_indices(idx);
-        
+
         double P_i = jacobi_polynomial(i, 0.0, 0.0, r);
         double P_j = jacobi_polynomial(j, 2.0 * i + 1.0, 0.0, s);
-        
-    // Normalization factor chosen so that the scaled Gram matrix in tests is identity
-    double normalization = 2.0 * std::sqrt((2.0 * i + 1.0) * (i + j + 1.0));
+
+        // Normalization factor chosen so that the scaled Gram matrix in tests is identity
+        double normalization = 2.0 * std::sqrt((2.0 * i + 1.0) * (i + j + 1.0));
         double scaling = std::pow(0.5 * (1.0 - s), i);
-        
+
         phi[idx] = normalization * P_i * P_j * scaling;
     }
-    
+
     return phi;
 }
 
@@ -116,16 +122,16 @@ Eigen::MatrixXd DubinerBasis::evaluate_gradient(const Eigen::Vector2d& xi) const
     }
 
     Eigen::MatrixXd grad(n_basis_, 2);
-    
+
     auto [r, s] = transform_coordinates(xi_eval);
     const double xi_val = xi_eval[0];
     const double eta_val = xi_eval[1];
     const double one_minus_eta = 1.0 - eta_val;
-    
+
     // Compute transformation derivatives
     // r = 2*xi/(1-eta) - 1,  s = 2*eta - 1
     double dr_dxi, dr_deta, ds_dxi, ds_deta;
-    
+
     if (std::abs(one_minus_eta) < 1e-14) {
         dr_dxi = 0.0;
         dr_deta = 0.0;
@@ -137,28 +143,28 @@ Eigen::MatrixXd DubinerBasis::evaluate_gradient(const Eigen::Vector2d& xi) const
         ds_dxi = 0.0;
         ds_deta = 2.0;  // Since s = 2*eta - 1
     }
-    
+
     for (int idx = 0; idx < n_basis_; ++idx) {
         auto [i, j] = get_dubiner_indices(idx);
-        
+
         double P_i = jacobi_polynomial(i, 0.0, 0.0, r);
         double P_j = jacobi_polynomial(j, 2.0 * i + 1.0, 0.0, s);
         double dP_i_dr = (i > 0) ? jacobi_derivative(i, 0.0, 0.0, r) : 0.0;
         double dP_j_ds = (j > 0) ? jacobi_derivative(j, 2.0 * i + 1.0, 0.0, s) : 0.0;
-        
-    double normalization = 2.0 * std::sqrt((2.0 * i + 1.0) * (i + j + 1.0));
+
+        double normalization = 2.0 * std::sqrt((2.0 * i + 1.0) * (i + j + 1.0));
         double scaling = std::pow(0.5 * (1.0 - s), i);
         double dscaling_ds = (i > 0) ? -0.5 * i * std::pow(0.5 * (1.0 - s), i - 1) : 0.0;
-        
+
         // Compute derivatives using chain rule
         double dphi_dr = normalization * dP_i_dr * P_j * scaling;
         double dphi_ds = normalization * P_i * (dP_j_ds * scaling + P_j * dscaling_ds);
-        
-        grad(idx, 0) = dphi_dr * dr_dxi + dphi_ds * ds_dxi;  // d/d_xi
+
+        grad(idx, 0) = dphi_dr * dr_dxi + dphi_ds * ds_dxi;    // d/d_xi
         grad(idx, 1) = dphi_dr * dr_deta + dphi_ds * ds_deta;  // d/d_eta
     }
-    
+
     return grad;
 }
 
-} // namespace dgfem
+}  // namespace dgfem
