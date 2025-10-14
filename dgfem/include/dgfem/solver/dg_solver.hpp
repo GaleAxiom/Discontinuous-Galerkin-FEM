@@ -8,14 +8,19 @@
 #include "dgfem/core/mesh.hpp"
 
 #include <Eigen/Dense>
+#include <cstdint>
+#include <filesystem>
 
+#include <array>
+#include <chrono>
 #include <functional>
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "assembler.hpp"
-#include "time_stepping.hpp"
+// #include "time_stepping.hpp"
 #include "weak_form.hpp"
 
 namespace dgfem {
@@ -25,7 +30,33 @@ namespace dgfem {
  */
 class DGSolverBase {
 public:
-    explicit DGSolverBase(std::shared_ptr<DGMesh> mesh);
+    enum class Stage : std::uint8_t {
+        Setup = 0,
+        Assembly,
+        Solve,
+        Projection,
+        TimeStep,
+        Output,
+        Postprocess,
+        Count
+    };
+
+    struct StageStats {
+        double total_time{0.0};
+        int count{0};
+    };
+
+    struct SolverTelemetry {
+        std::array<StageStats, static_cast<std::size_t>(Stage::Count)> stages{};
+        double wall_time{0.0};
+        int steps_completed{0};
+        int rhs_evaluations{0};
+        int output_frames{0};
+    };
+
+    using StageObserver = std::function<void(Stage, const SolverTelemetry&)>;
+
+    explicit DGSolverBase(std::shared_ptr<DGMesh> mesh, std::string solver_name = "DG Solver");
     virtual ~DGSolverBase() = default;
 
     // Delete copy, default move
@@ -34,11 +65,59 @@ public:
     DGSolverBase(DGSolverBase&&) noexcept = default;
     DGSolverBase& operator=(DGSolverBase&&) noexcept = default;
 
+    void set_solver_name(std::string name);
+    [[nodiscard]] const std::string& solver_name() const noexcept;
+
+    void set_verbose(bool verbose) noexcept;
+    [[nodiscard]] bool verbose() const noexcept;
+
+    void set_output_directory(std::filesystem::path directory);
+    [[nodiscard]] const std::filesystem::path& output_directory() const noexcept;
+
+    void add_stage_observer(StageObserver observer);
+
+    void reset_telemetry();
+    [[nodiscard]] const SolverTelemetry& telemetry() const noexcept;
+
+    [[nodiscard]] std::shared_ptr<DGMesh> mesh() const noexcept { return mesh_; }
+    [[nodiscard]] std::shared_ptr<DGSpace> space() const;
+    [[nodiscard]] int total_dofs() const;
+
     [[nodiscard]] virtual const Eigen::SparseMatrix<double>& get_system_matrix() const = 0;
 
 protected:
+    void begin_stage(Stage stage) const;
+    void end_stage(Stage stage) const;
+
+    void increment_steps(int steps = 1) noexcept;
+    void increment_rhs_evaluations(int rhs = 1) const noexcept;
+    void increment_output_frames(int frames = 1) noexcept;
+
+    void log(Stage stage, const std::string& message) const;
+    void log(const std::string& message) const;
+
+    [[nodiscard]] std::filesystem::path make_output_path(const std::string& stem,
+                                                         const std::string& extension = "") const;
+
+    static std::string stage_to_string(Stage stage);
+
     std::shared_ptr<DGMesh> mesh_;
     std::shared_ptr<DGAssembler> assembler_;
+
+private:
+    using Clock = std::chrono::steady_clock;
+
+    void notify_observers(Stage stage) const;
+
+    std::string solver_name_;
+    std::filesystem::path output_directory_;
+    bool verbose_{true};
+
+    mutable SolverTelemetry telemetry_;
+    mutable std::array<bool, static_cast<std::size_t>(Stage::Count)> active_stage_flags_{};
+    mutable std::array<Clock::time_point, static_cast<std::size_t>(Stage::Count)>
+        stage_start_time_{};
+    std::vector<StageObserver> observers_;
 };
 
 /**
@@ -138,9 +217,45 @@ private:
 };
 
 /**
+ * @brief Base class for compressible flow solvers (Euler, Navier-Stokes)
+ */
+class CompressibleDGSolverBase : public DGSolverBase {
+public:
+    using StateVector = std::vector<Eigen::MatrixXd>;
+
+    [[nodiscard]] const Eigen::SparseMatrix<double>& get_system_matrix() const override;
+
+protected:
+    CompressibleDGSolverBase(std::shared_ptr<DGMesh> mesh,
+                             std::shared_ptr<EulerWeakFormulation> weak_form,
+                             std::string solver_label);
+
+    [[nodiscard]] StateVector assemble_residual(const StateVector& u_coeffs) const;
+    void compute_mass_matrix_inverse_blocks();
+    [[nodiscard]] StateVector apply_mass_inv(const StateVector& vec) const;
+    [[nodiscard]] StateVector
+    project_initial_condition(std::function<Eigen::Vector4d(const Eigen::Vector2d&)> u0_func);
+    [[nodiscard]] StateVector time_step_ssp_rk3(const StateVector& u_n, double dt) const;
+    [[nodiscard]] double compute_max_cfl(const StateVector& u_coeffs, double dt) const;
+    [[nodiscard]] std::vector<Eigen::MatrixXd>
+    run_time_integration(std::function<Eigen::Vector4d(const Eigen::Vector2d&)> initial_condition,
+                         double T_final, double dt, int save_every);
+
+    std::shared_ptr<EulerWeakFormulation> weak_form_;
+    double gamma_;
+
+private:
+    std::vector<Eigen::MatrixXd> M_inv_blocks_;
+    std::string solver_label_;
+
+    [[nodiscard]] std::vector<Eigen::MatrixXd>
+    flatten_frames(const std::vector<StateVector>& frames) const;
+};
+
+/**
  * @brief Euler equations DG solver
  */
-class EulerDGSolver : public DGSolverBase {
+class EulerDGSolver : public CompressibleDGSolverBase {
 public:
     EulerDGSolver(std::shared_ptr<DGMesh> mesh, double gamma = 1.4);
     EulerDGSolver(std::shared_ptr<DGMesh> mesh, std::shared_ptr<EulerWeakFormulation> weak_form);
@@ -151,73 +266,29 @@ public:
     EulerDGSolver(EulerDGSolver&&) noexcept = default;
     EulerDGSolver& operator=(EulerDGSolver&&) noexcept = default;
 
-    /**
-     * @brief Solve Euler equations with time stepping
-     */
     [[nodiscard]] std::vector<Eigen::MatrixXd>
     solve(std::function<Eigen::Vector4d(const Eigen::Vector2d&)> initial_condition, double T_final,
           double dt, int save_every = 1);
-
-    [[nodiscard]] const Eigen::SparseMatrix<double>& get_system_matrix() const override;
-
-private:
-    std::shared_ptr<EulerWeakFormulation> weak_form_;
-    std::shared_ptr<DGAssembler> assembler_;
-    double gamma_;
-
-    // Precomputed operators for time stepping
-    std::vector<Eigen::MatrixXd> M_inv_blocks_;  // Mass matrix inverse blocks per element
-
-    /**
-     * @brief Compute mass matrix inverse blocks
-     */
-    void compute_mass_matrix_inverse_blocks();
-
-    /**
-     * @brief Apply inverse mass matrix M^{-1} * vec
-     * @param vec Input vector of shape (n_elem, n_basis, n_vars)
-     * @return Result of shape (n_elem, n_basis, n_vars)
-     */
-    [[nodiscard]] std::vector<Eigen::MatrixXd>
-    apply_mass_inv(const std::vector<Eigen::MatrixXd>& vec) const;
-
-    /**
-     * @brief Project initial condition using L2 projection
-     */
-    [[nodiscard]] std::vector<Eigen::MatrixXd>
-    project_initial_condition(std::function<Eigen::Vector4d(const Eigen::Vector2d&)> u0_func);
-
-    /**
-     * @brief Time stepping using SSP-RK3 (Strong Stability Preserving Runge-Kutta 3rd order)
-     */
-    [[nodiscard]] std::vector<Eigen::MatrixXd>
-    time_step_ssp_rk3(const std::vector<Eigen::MatrixXd>& u_n, double dt) const;
-
-    /**
-     * @brief Assemble Euler residual for all elements
-     */
-    [[nodiscard]] std::vector<Eigen::MatrixXd>
-    assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_coeffs) const;
-
-    /**
-     * @brief Compute maximum CFL number across all elements
-     * @param u_coeffs Current solution coefficients
-     * @param dt Time step size
-     * @return Maximum CFL number
-     */
-    [[nodiscard]] double compute_max_cfl(const std::vector<Eigen::MatrixXd>& u_coeffs,
-                                         double dt) const;
 };
 
 /**
- * @brief Navier-Stokes solver leveraging Euler infrastructure with viscous weak formulation
+ * @brief Navier-Stokes solver with independent implementation
  */
-class NavierStokesDGSolver : public EulerDGSolver {
+class NavierStokesDGSolver : public CompressibleDGSolverBase {
 public:
     NavierStokesDGSolver(std::shared_ptr<DGMesh> mesh, double gamma = 1.4,
                          double dynamic_viscosity = 1.0e-3, double prandtl = 0.72,
                          double penalty_prefactor = 5.0);
-    ~NavierStokesDGSolver() override = default;
+
+    // Delete copy, default move
+    NavierStokesDGSolver(const NavierStokesDGSolver&) = delete;
+    NavierStokesDGSolver& operator=(const NavierStokesDGSolver&) = delete;
+    NavierStokesDGSolver(NavierStokesDGSolver&&) noexcept = default;
+    NavierStokesDGSolver& operator=(NavierStokesDGSolver&&) noexcept = default;
+
+    [[nodiscard]] std::vector<Eigen::MatrixXd>
+    solve(std::function<Eigen::Vector4d(const Eigen::Vector2d&)> initial_condition, double T_final,
+          double dt, int save_every = 1);
 };
 
 }  // namespace dgfem

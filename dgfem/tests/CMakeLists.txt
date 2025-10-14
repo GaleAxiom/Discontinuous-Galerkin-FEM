@@ -50,6 +50,6 @@ gtest_discover_tests(
     PROPERTIES LABELS "dgfem"
 )
 
-# Convenience aggregate test for running the full suite from ctest
-add_test(NAME dgfem_tests_all COMMAND dgfem_tests)
-set_tests_properties(dgfem_tests_all PROPERTIES LABELS "dgfem")
+# # Convenience aggregate test for running the full suite from ctest
+# add_test(NAME dgfem_tests_all COMMAND dgfem_tests)
+# set_tests_properties(dgfem_tests_all PROPERTIES LABELS "dgfem")
