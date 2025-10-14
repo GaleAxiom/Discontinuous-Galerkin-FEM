@@ -99,6 +99,103 @@ std::shared_ptr<DGMesh> MeshCreator::create_euler_mesh(double xmin, double xmax,
     return create_dg_mesh_from_gmsh();
 }
 
+std::shared_ptr<DGMesh>
+MeshCreator::create_cylinder_channel_mesh(double length, double height, double radius,
+                                          const Eigen::Vector2d& center, double dx_channel,
+                                          double dx_cylinder, bool use_triangles) {
+    // Remove any existing models to prevent conflicts
+    std::vector<std::string> existing_models;
+    gmsh::model::list(existing_models);
+
+    if (!existing_models.empty()) {
+        gmsh::clear();
+    }
+
+    gmsh::model::add("cylinder_channel_mesh");
+
+    double xmin = 0.0;
+    double xmax = length;
+    double ymin = 0.0;
+    double ymax = height;
+
+    // Channel corner points
+    int p1 = gmsh::model::geo::addPoint(xmin, ymin, 0.0, dx_channel);
+    int p2 = gmsh::model::geo::addPoint(xmax, ymin, 0.0, dx_channel);
+    int p3 = gmsh::model::geo::addPoint(xmax, ymax, 0.0, dx_channel);
+    int p4 = gmsh::model::geo::addPoint(xmin, ymax, 0.0, dx_channel);
+
+    // Cylinder center and points on the circumference (four quadrature points)
+    int pc = gmsh::model::geo::addPoint(center[0], center[1], 0.0, dx_cylinder);
+    int p5 = gmsh::model::geo::addPoint(center[0] + radius, center[1], 0.0, dx_cylinder);
+    int p6 = gmsh::model::geo::addPoint(center[0], center[1] + radius, 0.0, dx_cylinder);
+    int p7 = gmsh::model::geo::addPoint(center[0] - radius, center[1], 0.0, dx_cylinder);
+    int p8 = gmsh::model::geo::addPoint(center[0], center[1] - radius, 0.0, dx_cylinder);
+
+    // Channel boundary lines (counter-clockwise)
+    int l1 = gmsh::model::geo::addLine(p1, p2);  // Lower wall
+    int l2 = gmsh::model::geo::addLine(p2, p3);  // Outlet
+    int l3 = gmsh::model::geo::addLine(p3, p4);  // Upper wall
+    int l4 = gmsh::model::geo::addLine(p4, p1);  // Inlet
+
+    // Cylinder boundary (counter-clockwise arcs)
+    int c1 = gmsh::model::geo::addCircleArc(p5, pc, p6);
+    int c2 = gmsh::model::geo::addCircleArc(p6, pc, p7);
+    int c3 = gmsh::model::geo::addCircleArc(p7, pc, p8);
+    int c4 = gmsh::model::geo::addCircleArc(p8, pc, p5);
+
+    int outer_loop = gmsh::model::geo::addCurveLoop({l1, l2, l3, l4});
+    int inner_loop = gmsh::model::geo::addCurveLoop({c1, c2, c3, c4});
+    int surface = gmsh::model::geo::addPlaneSurface({outer_loop, inner_loop});
+
+    // Synchronize the CAD kernel with the model
+    gmsh::model::geo::synchronize();
+
+    // Tag physical groups for boundary condition mapping
+    gmsh::model::addPhysicalGroup(2, {surface}, 1);
+    gmsh::model::setPhysicalName(2, 1, "Domain");
+
+    gmsh::model::addPhysicalGroup(1, {l4}, 2);
+    gmsh::model::setPhysicalName(1, 2, "Inlet");
+
+    gmsh::model::addPhysicalGroup(1, {l2}, 3);
+    gmsh::model::setPhysicalName(1, 3, "Outlet");
+
+    gmsh::model::addPhysicalGroup(1, {l1}, 4);
+    gmsh::model::setPhysicalName(1, 4, "LowerWall");
+
+    gmsh::model::addPhysicalGroup(1, {l3}, 5);
+    gmsh::model::setPhysicalName(1, 5, "UpperWall");
+
+    gmsh::model::addPhysicalGroup(1, {c1, c2, c3, c4}, 6);
+    gmsh::model::setPhysicalName(1, 6, "Cylinder");
+
+    // Configure mesh generation strategy
+    configure_mesh_generation(use_triangles);
+
+    // Refine the mesh near the cylinder using a distance-based background field
+    int distance_field = gmsh::model::mesh::field::add("Distance");
+    std::vector<double> cylinder_curve_ids{static_cast<double>(c1), static_cast<double>(c2),
+                                           static_cast<double>(c3), static_cast<double>(c4)};
+    gmsh::model::mesh::field::setNumbers(distance_field, "CurvesList", cylinder_curve_ids);
+    gmsh::model::mesh::field::setNumber(distance_field, "NumPointsPerCurve", 50);
+
+    int threshold_field = gmsh::model::mesh::field::add("Threshold");
+    gmsh::model::mesh::field::setNumber(threshold_field, "InField", distance_field);
+    gmsh::model::mesh::field::setNumber(threshold_field, "SizeMin", dx_cylinder);
+    gmsh::model::mesh::field::setNumber(threshold_field, "SizeMax", dx_channel);
+    gmsh::model::mesh::field::setNumber(threshold_field, "DistMin", radius * 0.4);
+    gmsh::model::mesh::field::setNumber(threshold_field, "DistMax", radius * 5.0);
+    gmsh::model::mesh::field::setAsBackgroundMesh(threshold_field);
+
+    gmsh::model::mesh::generate(2);
+
+    // Clear mesh fields to avoid side-effects in subsequent mesh generations
+    gmsh::model::mesh::field::remove(distance_field);
+    gmsh::model::mesh::field::remove(threshold_field);
+
+    return create_dg_mesh_from_gmsh();
+}
+
 std::shared_ptr<DGMesh> MeshCreator::create_dg_mesh_from_gmsh() {
     Eigen::MatrixXd vertices;
     Eigen::MatrixXi elements;
