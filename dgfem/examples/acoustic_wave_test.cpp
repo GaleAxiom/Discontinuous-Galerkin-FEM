@@ -506,10 +506,10 @@ int main() {
                           << results["time"][i] << "  | " << std::setw(9) << std::scientific
                           << std::setprecision(3) << results["amplitude"][i] << " | "
                           << std::setw(10) << std::fixed << std::setprecision(2)
-                          << results["dissipation"][i] << "%"
-                          << " | " << std::setw(11) << std::scientific << std::setprecision(2)
-                          << results["phase_error"][i] << " | " << std::setw(8)
-                          << std::setprecision(2) << results["l2_error"][i] << std::endl;
+                          << results["dissipation"][i] << "%" << " | " << std::setw(11)
+                          << std::scientific << std::setprecision(2) << results["phase_error"][i]
+                          << " | " << std::setw(8) << std::setprecision(2) << results["l2_error"][i]
+                          << std::endl;
             }
 
             // Export VTK
