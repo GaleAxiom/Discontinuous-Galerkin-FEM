@@ -99,12 +99,10 @@ std::shared_ptr<DGMesh> MeshCreator::create_euler_mesh(double xmin, double xmax,
     return create_dg_mesh_from_gmsh();
 }
 
-std::shared_ptr<DGMesh> MeshCreator::create_cylinder_channel_mesh(double length, double height,
-                                                                  double radius,
-                                                                  const Eigen::Vector2d& center,
-                                                                  double dx_channel,
-                                                                  double dx_cylinder,
-                                                                  bool use_triangles) {
+std::shared_ptr<DGMesh>
+MeshCreator::create_cylinder_channel_mesh(double length, double height, double radius,
+                                          const Eigen::Vector2d& center, double dx_channel,
+                                          double dx_cylinder, bool use_triangles) {
     // Remove any existing models to prevent conflicts
     std::vector<std::string> existing_models;
     gmsh::model::list(existing_models);

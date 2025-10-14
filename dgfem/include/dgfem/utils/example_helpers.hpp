@@ -104,10 +104,11 @@ public:
     /**
      * @brief Create a DG-ready mesh for a channel with a cylindrical obstacle.
      */
-    static std::shared_ptr<DGMesh> create_cylinder_channel_mesh(
-        int order, double dx_channel, double dx_cylinder, int n_vars = 4, double length = 2.2,
-        double height = 0.41, const Eigen::Vector2d& center = Eigen::Vector2d(0.2, 0.2),
-        double radius = 0.05, bool use_triangles = true) {
+    static std::shared_ptr<DGMesh>
+    create_cylinder_channel_mesh(int order, double dx_channel, double dx_cylinder, int n_vars = 4,
+                                 double length = 2.2, double height = 0.41,
+                                 const Eigen::Vector2d& center = Eigen::Vector2d(0.2, 0.2),
+                                 double radius = 0.05, bool use_triangles = true) {
         MeshCreator::initialize_gmsh();
 
         auto& config = Config::instance();
@@ -119,9 +120,8 @@ public:
         config.ymin = 0.0;
         config.ymax = height;
 
-        auto mesh = MeshCreator::create_cylinder_channel_mesh(length, height, radius, center,
-                                                              dx_channel, dx_cylinder,
-                                                              use_triangles);
+        auto mesh = MeshCreator::create_cylinder_channel_mesh(
+            length, height, radius, center, dx_channel, dx_cylinder, use_triangles);
         auto dg_space = std::make_shared<DGSpace>(mesh->get_element_type(), order);
         mesh->initialize_dg_space(dg_space, n_vars);
 

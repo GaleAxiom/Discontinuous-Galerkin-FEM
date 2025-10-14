@@ -1,6 +1,7 @@
 /**
  * @file von_karman_vortices_example.cpp
- * @brief Laminar flow past a cylinder generating von Kármán vortices using the Navier-Stokes DG solver.
+ * @brief Laminar flow past a cylinder generating von Kármán vortices using the Navier-Stokes DG
+ * solver.
  *
  * The setup follows the classical flow-around-a-cylinder benchmark (Re ≈ 100) inside a confined
  * channel. A uniform inflow profile drives the flow, producing periodic vortex shedding in the
@@ -14,8 +15,8 @@
 #include "dgfem/utils/vtk_writer.hpp"
 
 #include <Eigen/Dense>
-
 #include <filesystem>
+
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
@@ -23,12 +24,12 @@
 namespace {
 
 struct CylinderChannelConfig {
-    double length = 1.0;      ///< Channel length
-    double height = 0.5;     ///< Channel height
-    double radius = 0.05;     ///< Cylinder radius
+    double length = 1.0;   ///< Channel length
+    double height = 0.5;   ///< Channel height
+    double radius = 0.05;  ///< Cylinder radius
     Eigen::Vector2d center{0.2, 0.2};
-    double dx_channel = 0.025;   ///< Characteristic mesh size away from the cylinder
-    double dx_cylinder = 0.01; ///< Refined size near the cylinder boundary
+    double dx_channel = 0.025;  ///< Characteristic mesh size away from the cylinder
+    double dx_cylinder = 0.01;  ///< Refined size near the cylinder boundary
 };
 
 struct UniformInflowProfile {
@@ -57,8 +58,7 @@ struct UniformInflowProfile {
     }
 };
 
-std::shared_ptr<dgfem::BoundaryConditionEuler>
-make_no_slip_bc(double density, double pressure) {
+std::shared_ptr<dgfem::BoundaryConditionEuler> make_no_slip_bc(double density, double pressure) {
     Eigen::Vector4d W;
     W << density, 0.0, 0.0, pressure;
     return std::make_shared<dgfem::BoundaryConditionEuler>(
@@ -74,12 +74,12 @@ int main() {
         constexpr double gamma = 1.4;
         constexpr double density = 1.0;
         constexpr double pressure = 100.0;
-        constexpr double mu = 1.0e-6;     // Dynamic viscosity (Re ≈ 100 with chosen scales)
-        constexpr double prandtl = 0.72;   // Standard air value
+        constexpr double mu = 1.0e-6;       // Dynamic viscosity (Re ≈ 100 with chosen scales)
+        constexpr double prandtl = 0.72;    // Standard air value
         constexpr double penalty = 1000.0;  // SIPG penalty prefactor for viscous terms
 
-    CylinderChannelConfig config;
-    UniformInflowProfile inflow{gamma, density, 1.0, pressure, config.height};
+        CylinderChannelConfig config;
+        UniformInflowProfile inflow{gamma, density, 1.0, pressure, config.height};
 
         const int poly_order = 3;
         auto mesh = dgfem::MeshSetup::create_cylinder_channel_mesh(
@@ -98,8 +98,7 @@ int main() {
             [inflow](const Eigen::Vector2d& x) { return inflow.conserved(x); });
 
         auto outlet_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
-            dgfem::BCTypeEuler::FAR_FIELD,
-            [=](const Eigen::Vector2d& x) {
+            dgfem::BCTypeEuler::FAR_FIELD, [=](const Eigen::Vector2d& x) {
                 // Mirror the uniform inflow profile to minimise reflections at the outlet
                 return inflow.conserved(x);
             });
@@ -143,9 +142,9 @@ int main() {
 
         dgfem::Timer solve_timer("von Kármán vortex solve");
         dgfem::NavierStokesDGSolver solver(mesh, gamma, mu, prandtl, penalty);
-        auto solution_frames = solver.solve(
-            [inflow](const Eigen::Vector2d& x) { return inflow.conserved(x); }, T_final, dt,
-            save_every);
+        auto solution_frames =
+            solver.solve([inflow](const Eigen::Vector2d& x) { return inflow.conserved(x); },
+                         T_final, dt, save_every);
 
         if (solution_frames.empty()) {
             throw std::runtime_error("Navier-Stokes solver did not return any solution frames.");

@@ -52,8 +52,8 @@ public:
                       double dx = 0.2, bool use_triangles = false);
 
     /**
-     * @brief Create a channel mesh with a cylindrical obstacle, suitable for von Kármán vortex street
-     * simulations
+     * @brief Create a channel mesh with a cylindrical obstacle, suitable for von Kármán vortex
+     * street simulations
      * @param length Channel length in the streamwise direction
      * @param height Channel height in the cross-stream direction
      * @param radius Cylinder radius
