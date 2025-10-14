@@ -35,3 +35,7 @@ target_link_libraries(acoustic_wave_test dgfem)
 # High-order elements test example
 add_executable(high_order_test high_order_test.cpp)
 target_link_libraries(high_order_test dgfem)
+
+# von Kármán vortex street example
+add_executable(von_karman_vortices_example von_karman_vortices_example.cpp)
+target_link_libraries(von_karman_vortices_example dgfem)
