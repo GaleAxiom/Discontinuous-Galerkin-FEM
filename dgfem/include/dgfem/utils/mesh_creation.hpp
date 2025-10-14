@@ -52,6 +52,24 @@ public:
                       double dx = 0.2, bool use_triangles = false);
 
     /**
+     * @brief Create a channel mesh with a cylindrical obstacle, suitable for von Kármán vortex street
+     * simulations
+     * @param length Channel length in the streamwise direction
+     * @param height Channel height in the cross-stream direction
+     * @param radius Cylinder radius
+     * @param center Cylinder center position
+     * @param dx_channel Target mesh size away from the cylinder
+     * @param dx_cylinder Target mesh size on and near the cylinder boundary
+     * @param use_triangles Generate triangles (default) or recombined quads
+     * @return Shared pointer to created DGMesh
+     */
+    [[nodiscard]] static std::shared_ptr<DGMesh>
+    create_cylinder_channel_mesh(double length = 2.2, double height = 0.41, double radius = 0.05,
+                                 const Eigen::Vector2d& center = Eigen::Vector2d(0.2, 0.2),
+                                 double dx_channel = 0.08, double dx_cylinder = 0.02,
+                                 bool use_triangles = true);
+
+    /**
      * @brief Create DGMesh from current GMSH model
      * @return Shared pointer to created DGMesh
      */
