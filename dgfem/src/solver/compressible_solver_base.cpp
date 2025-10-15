@@ -34,7 +34,8 @@ const Eigen::SparseMatrix<double>& CompressibleDGSolverBase::get_system_matrix()
 CompressibleDGSolverBase::StateVector
 CompressibleDGSolverBase::assemble_residual(const StateVector& u_coeffs) const {
     increment_rhs_evaluations();
-    return assembler_->assemble_euler_residual(u_coeffs);
+    assembler_->assemble_euler_residual(u_coeffs, residual_buffer_);
+    return residual_buffer_;
 }
 
 void CompressibleDGSolverBase::compute_mass_matrix_inverse_blocks() {

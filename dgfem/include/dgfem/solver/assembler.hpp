@@ -55,8 +55,8 @@ public:
      * @param u_coeffs Solution coefficients for each element (n_elem, n_basis, n_vars)
      * @return Residual for each element (n_elem, n_basis, n_vars)
      */
-    [[nodiscard]] std::vector<Eigen::MatrixXd>
-    assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_coeffs);
+    void assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_coeffs,
+                                 std::vector<Eigen::MatrixXd>& residuals_out);
 
     /**
      * @brief Get the weak formulation type

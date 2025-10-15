@@ -247,6 +247,7 @@ protected:
 private:
     std::vector<Eigen::MatrixXd> M_inv_blocks_;
     std::string solver_label_;
+    mutable StateVector residual_buffer_;
 
     [[nodiscard]] std::vector<Eigen::MatrixXd>
     flatten_frames(const std::vector<StateVector>& frames) const;

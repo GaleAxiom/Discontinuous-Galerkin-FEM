@@ -24,10 +24,10 @@
 namespace {
 
 struct CylinderChannelConfig {
-    double length = 1.0;   ///< Channel length
-    double height = 0.5;   ///< Channel height
+    double length = 3.0;   ///< Channel length
+    double height = 1.;   ///< Channel height
     double radius = 0.05;  ///< Cylinder radius
-    Eigen::Vector2d center{0.2, 0.2};
+    Eigen::Vector2d center{0.2, 0.5}; ///< Cylinder center
     double dx_channel = 0.025;  ///< Characteristic mesh size away from the cylinder
     double dx_cylinder = 0.01;  ///< Refined size near the cylinder boundary
 };
@@ -74,12 +74,12 @@ int main() {
         constexpr double gamma = 1.4;
         constexpr double density = 1.0;
         constexpr double pressure = 100.0;
-        constexpr double mu = 1.0e-6;       // Dynamic viscosity (Re ≈ 100 with chosen scales)
+        constexpr double mu = 1.0e-5;       // Dynamic viscosity (Re ≈ 100 with chosen scales)
         constexpr double prandtl = 0.72;    // Standard air value
         constexpr double penalty = 1000.0;  // SIPG penalty prefactor for viscous terms
 
         CylinderChannelConfig config;
-        UniformInflowProfile inflow{gamma, density, 1.0, pressure, config.height};
+        UniformInflowProfile inflow{gamma, density, 0.01, pressure, config.height};
 
         const int poly_order = 3;
         auto mesh = dgfem::MeshSetup::create_cylinder_channel_mesh(
@@ -118,12 +118,6 @@ int main() {
         ensure_tag("LowerWall");
         ensure_tag("UpperWall");
         ensure_tag("Cylinder");
-
-        mesh->set_boundary_condition_euler("Inlet", inlet_bc);
-        mesh->set_boundary_condition_euler("Outlet", outlet_bc);
-        mesh->set_boundary_condition_euler("LowerWall", wall_bc);
-        mesh->set_boundary_condition_euler("UpperWall", wall_bc);
-        mesh->set_boundary_condition_euler("Cylinder", cylinder_bc);
 
         mesh->build_precomputed_faces();
         mesh->set_boundary_condition_euler("Inlet", inlet_bc);
