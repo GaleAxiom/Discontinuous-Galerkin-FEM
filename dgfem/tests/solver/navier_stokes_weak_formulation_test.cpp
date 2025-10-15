@@ -620,8 +620,7 @@ TEST(NavierStokesWeakFormulationTest, EulerInteriorFaceResidualPerformance) {
         const auto& face_data_L = mesh->get_element_face_data(face.elem_L, face.face_L);
         const auto& face_data_R = mesh->get_element_face_data(face.elem_R, face.face_R);
         (void)weak_form->interior_face_residual(u_coeffs[face.elem_L], u_coeffs[face.elem_R],
-                                                face_data_L, face_data_R, space,
-                                                face.permutation);
+                                                face_data_L, face_data_R, space, face.permutation);
     }
 
     constexpr int iterations = 20;
@@ -646,6 +645,5 @@ TEST(NavierStokesWeakFormulationTest, EulerInteriorFaceResidualPerformance) {
     const double avg_time_per_face = best_time / static_cast<double>(interior_faces.size());
     EXPECT_GT(avg_time_per_face, 0.0);
     std::cout << "[PERF] Euler interior face residual: order=" << poly_order
-              << ", best_time_per_face_us=" << avg_time_per_face << ", sink=" << sink
-              << std::endl;
+              << ", best_time_per_face_us=" << avg_time_per_face << ", sink=" << sink << std::endl;
 }

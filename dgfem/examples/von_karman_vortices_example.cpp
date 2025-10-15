@@ -24,12 +24,12 @@
 namespace {
 
 struct CylinderChannelConfig {
-    double length = 3.0;   ///< Channel length
-    double height = 1.;   ///< Channel height
-    double radius = 0.05;  ///< Cylinder radius
-    Eigen::Vector2d center{0.2, 0.5}; ///< Cylinder center
-    double dx_channel = 0.025;  ///< Characteristic mesh size away from the cylinder
-    double dx_cylinder = 0.01;  ///< Refined size near the cylinder boundary
+    double length = 3.0;               ///< Channel length
+    double height = 1.;                ///< Channel height
+    double radius = 0.05;              ///< Cylinder radius
+    Eigen::Vector2d center{0.2, 0.5};  ///< Cylinder center
+    double dx_channel = 0.025;         ///< Characteristic mesh size away from the cylinder
+    double dx_cylinder = 0.01;         ///< Refined size near the cylinder boundary
 };
 
 struct UniformInflowProfile {

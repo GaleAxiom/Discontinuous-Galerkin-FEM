@@ -164,8 +164,7 @@ void DGAssembler::assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_
             elem_residual.setZero();
         }
         auto resize_end = std::chrono::high_resolution_clock::now();
-        total_resize_time +=
-            std::chrono::duration<double>(resize_end - resize_start).count();
+        total_resize_time += std::chrono::duration<double>(resize_end - resize_start).count();
     }
 
     // Volume contributions
@@ -262,14 +261,13 @@ void DGAssembler::assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_
     call_count++;
     // Print timing every 300 calls (100 time steps * 3 RK stages)
     if (call_count % 300 == 0) {
-    double total_face_time = total_interior_face_time + total_interior_visc_time +
-                 total_boundary_face_time + total_boundary_visc_time;
-    double total_volume = total_volume_time + total_visc_volume_time;
-    double grand_total = total_resize_time + total_volume + total_face_time;
+        double total_face_time = total_interior_face_time + total_interior_visc_time +
+                                 total_boundary_face_time + total_boundary_visc_time;
+        double total_volume = total_volume_time + total_visc_volume_time;
+        double grand_total = total_resize_time + total_volume + total_face_time;
 
         std::cout << "[TIMER] Residual assembly (" << call_count << " calls): "
-                  << "Resize=" << std::fixed << std::setprecision(4) << total_resize_time
-                  << "s, "
+                  << "Resize=" << std::fixed << std::setprecision(4) << total_resize_time << "s, "
                   << "Vol=" << total_volume_time << "s, "
                   << "ViscVol=" << total_visc_volume_time << "s, "
                   << "IntFace=" << total_interior_face_time << "s, "
@@ -278,7 +276,6 @@ void DGAssembler::assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_
                   << "BndVisc=" << total_boundary_visc_time << "s, "
                   << "Total=" << grand_total << "s" << std::endl;
     }
-
 }
 
 }  // namespace dgfem

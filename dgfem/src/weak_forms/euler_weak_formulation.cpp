@@ -15,7 +15,7 @@
 
 namespace dgfem {
 
-EulerWeakFormulation::EulerWeakFormulation(double gamma) 
+EulerWeakFormulation::EulerWeakFormulation(double gamma)
     : gamma_(gamma), gamma_minus_one_(gamma - 1.0) {}
 
 // Helper struct to avoid redundant conversions
@@ -71,10 +71,10 @@ Eigen::Vector4d EulerWeakFormulation::rusanov_flux(const Eigen::Vector4d& U_L,
 
 Eigen::MatrixXd
 EulerWeakFormulation::volume_residual(const Eigen::MatrixXd& u_coeffs_elem,
-                                                const std::map<std::string, Eigen::MatrixXd>& elem_data,
-                                                std::shared_ptr<DGSpace> dg_space) const {
+                                      const std::map<std::string, Eigen::MatrixXd>& elem_data,
+                                      std::shared_ptr<DGSpace> dg_space) const {
     const int n_basis = dg_space->get_basis()->get_n_basis();
-    const int n_vars = u_coeffs_elem.cols(); // Should be 4
+    const int n_vars = u_coeffs_elem.cols();  // Should be 4
     Eigen::MatrixXd R_vol = Eigen::MatrixXd::Zero(n_basis, n_vars);
 
     // Get references to data to avoid map lookups in the loop
@@ -108,23 +108,20 @@ EulerWeakFormulation::volume_residual(const Eigen::MatrixXd& u_coeffs_elem,
         const double w = w_phys[q];
 
         // Vectorized outer-product update
-        R_vol += w * (grad_phi_q.col(0) * F_q.transpose() +
-                      grad_phi_q.col(1) * G_q.transpose());
+        R_vol += w * (grad_phi_q.col(0) * F_q.transpose() + grad_phi_q.col(1) * G_q.transpose());
     }
 
     return R_vol;
 }
 
-std::tuple<Eigen::MatrixXd, Eigen::MatrixXd>
-EulerWeakFormulation::interior_face_residual(
+std::tuple<Eigen::MatrixXd, Eigen::MatrixXd> EulerWeakFormulation::interior_face_residual(
     const Eigen::MatrixXd& u_coeffs_L, const Eigen::MatrixXd& u_coeffs_R,
     const std::map<std::string, Eigen::MatrixXd>& face_data_L,
     const std::map<std::string, Eigen::MatrixXd>& face_data_R, std::shared_ptr<DGSpace> dg_space,
     const Eigen::VectorXi& permutation) const {
-
     // --- Setup is the same ---
     const int n_basis = dg_space->get_basis()->get_n_basis();
-    const int n_vars = u_coeffs_L.cols(); // This will be 4
+    const int n_vars = u_coeffs_L.cols();  // This will be 4
     Eigen::MatrixXd R_face_L = Eigen::MatrixXd::Zero(n_basis, n_vars);
     Eigen::MatrixXd R_face_R = Eigen::MatrixXd::Zero(n_basis, n_vars);
 
@@ -134,7 +131,7 @@ EulerWeakFormulation::interior_face_residual(
     const Eigen::Vector2d& normal = face_data_L.at("normal").col(0);
     const double hF = face_data_L.at("length")(0, 0);
     const int n_quad = weights.size();
-    
+
     // U_L_q and U_R_q are small and will live on the stack.
     Eigen::Vector4d U_L_q, U_R_q;
 
@@ -193,8 +190,8 @@ Eigen::MatrixXd EulerWeakFormulation::boundary_face_residual(
     // OPTIMIZATION: Zero-copy reshape using Eigen::Map
     const int n_quad = static_cast<int>(weights.size());
     const double* qp_data = quad_points_mat.data();
-    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, 2, Eigen::RowMajor>> 
-        quad_points(qp_data, n_quad, 2);
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, 2, Eigen::RowMajor>> quad_points(
+        qp_data, n_quad, 2);
 
     for (int q = 0; q < n_quad; ++q) {
         // OPTIMIZATION: Use manual loop to avoid .row().transpose() overhead
@@ -282,10 +279,10 @@ Eigen::Vector4d primitive_to_conserved(const Eigen::Vector4d& primitive, double 
 Eigen::Vector4d conserved_to_primitive(const Eigen::Vector4d& conserved, double gamma) {
     const double rho = conserved[0];
     const double rho_inv = 1.0 / rho;  // Single division
-    
+
     const double u = conserved[1] * rho_inv;  // Multiply instead of divide
     const double v = conserved[2] * rho_inv;  // Multiply instead of divide
-    
+
     const double gamma_m1 = gamma - 1.0;
     const double p = gamma_m1 * (conserved[3] - 0.5 * rho * (u * u + v * v));
 
