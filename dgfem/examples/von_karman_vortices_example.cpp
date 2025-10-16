@@ -24,12 +24,12 @@
 namespace {
 
 struct CylinderChannelConfig {
-    double length = 3.0;               ///< Channel length
-    double height = 1.;                ///< Channel height
+    double length = 1.0;               ///< Channel length
+    double height = 0.5;                ///< Channel height
     double radius = 0.05;              ///< Cylinder radius
-    Eigen::Vector2d center{0.2, 0.5};  ///< Cylinder center
+    Eigen::Vector2d center{0.2, 0.2};  ///< Cylinder center
     double dx_channel = 0.025;         ///< Characteristic mesh size away from the cylinder
-    double dx_cylinder = 0.01;         ///< Refined size near the cylinder boundary
+    double dx_cylinder = 0.0075;         ///< Refined size near the cylinder boundary
 };
 
 struct UniformInflowProfile {
@@ -76,12 +76,17 @@ int main() {
         constexpr double pressure = 100.0;
         constexpr double mu = 1.0e-5;       // Dynamic viscosity (Re ≈ 100 with chosen scales)
         constexpr double prandtl = 0.72;    // Standard air value
-        constexpr double penalty = 1000.0;  // SIPG penalty prefactor for viscous terms
+        constexpr double penalty = 100.0;  // SIPG penalty prefactor for viscous terms
+        const int poly_order = 1;
+
+        // Time integration settings tailored for vortex shedding development
+        constexpr double dt = 3.0e-5;
+        constexpr double T_final = 3.0;
+        constexpr int save_every = 100;
 
         CylinderChannelConfig config;
         UniformInflowProfile inflow{gamma, density, 0.01, pressure, config.height};
 
-        const int poly_order = 3;
         auto mesh = dgfem::MeshSetup::create_cylinder_channel_mesh(
             poly_order, config.dx_channel, config.dx_cylinder, /*n_vars=*/4, config.length,
             config.height, config.center, config.radius, /*use_triangles=*/true);
@@ -126,11 +131,6 @@ int main() {
         mesh->set_boundary_condition_euler("UpperWall", wall_bc);
         mesh->set_boundary_condition_euler("Cylinder", cylinder_bc);
 
-        // Time integration settings tailored for vortex shedding development
-        constexpr double dt = 1.0e-5;
-        constexpr double T_final = 1.0;
-        constexpr int save_every = 25;
-
         std::cout << "\n--- Solving laminar Navier-Stokes ---" << std::endl;
         std::cout << "  dt = " << dt << ", T_final = " << T_final << std::endl;
 
@@ -156,7 +156,7 @@ int main() {
 
         std::cout << "\n--- Exporting frames to VTK ---" << std::endl;
         for (size_t i = 0; i < solution_frames.size(); ++i) {
-            auto filename = (output_dir / ("von_karman_frame_" + std::to_string(i))).string();
+            auto filename = (output_dir / ("von_karman_frame_1_poly_" + std::to_string(i))).string();
             dgfem::VTKWriter::write_euler_solution(mesh, solution_frames[i], filename, gamma,
                                                    /*refinement=*/1);
             if (i % 5 == 0 || i == solution_frames.size() - 1) {

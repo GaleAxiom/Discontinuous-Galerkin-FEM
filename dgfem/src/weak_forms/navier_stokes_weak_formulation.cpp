@@ -249,6 +249,8 @@ Eigen::MatrixXd NavierStokesWeakFormulation::viscous_boundary_face_residual(
             Eigen::Vector4d bc_data = bc->evaluate(x_q);
             switch (bc->get_type()) {
             case BCTypeEuler::NO_SLIP_WALL:
+            case BCTypeEuler::INLET:
+            case BCTypeEuler::OUTLET:
                 U_bc = primitive_to_conserved(bc_data, get_gamma());
                 break;
             case BCTypeEuler::FAR_FIELD:

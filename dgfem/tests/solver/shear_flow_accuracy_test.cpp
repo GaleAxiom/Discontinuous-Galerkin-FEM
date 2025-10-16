@@ -8,6 +8,7 @@
 
 #include <array>
 #include <memory>
+#include <string_view>
 
 #include <gtest/gtest.h>
 
@@ -102,16 +103,33 @@ TEST_F(NavierStokesShearFlowAccuracyTest, MaintainsManufacturedShearProfile) {
 
     ShearFlowAnalytic exact{gamma};
 
-    auto shear_bc = std::make_shared<BoundaryConditionEuler>(
-        BCTypeEuler::FAR_FIELD, [exact](const Eigen::Vector2d& x) { return exact.conserved(x); });
+    auto inlet_bc = std::make_shared<BoundaryConditionEuler>(
+        BCTypeEuler::INLET, [exact](const Eigen::Vector2d& x) { return exact.primitive(x); });
+    auto outlet_bc = std::make_shared<BoundaryConditionEuler>(
+        BCTypeEuler::OUTLET, [exact](const Eigen::Vector2d& x) { return exact.primitive(x); });
+    auto wall_bc = std::make_shared<BoundaryConditionEuler>(
+        BCTypeEuler::NO_SLIP_WALL, [exact](const Eigen::Vector2d& x) { return exact.primitive(x); });
 
-    for (const auto& [name, _] : mesh->get_boundary_tags()) {
-        mesh->set_boundary_condition_euler(name, shear_bc);
-    }
+    const auto& tags = mesh->get_boundary_tags();
+    const auto set_bc_if_exists = [&](std::string_view tag,
+                                      const std::shared_ptr<BoundaryConditionEuler>& bc) {
+        auto it = tags.find(std::string(tag));
+        if (it != tags.end()) {
+            mesh->set_boundary_condition_euler(it->first, bc);
+        }
+    };
+
+    set_bc_if_exists("Left", inlet_bc);
+    set_bc_if_exists("Right", outlet_bc);
+    set_bc_if_exists("Bottom", wall_bc);
+    set_bc_if_exists("Top", wall_bc);
+
     mesh->build_precomputed_faces();
-    for (const auto& [name, _] : mesh->get_boundary_tags()) {
-        mesh->set_boundary_condition_euler(name, shear_bc);
-    }
+
+    set_bc_if_exists("Left", inlet_bc);
+    set_bc_if_exists("Right", outlet_bc);
+    set_bc_if_exists("Bottom", wall_bc);
+    set_bc_if_exists("Top", wall_bc);
 
     constexpr double dt = 1.0e-5;
     constexpr double T_final = 5.0e-4;

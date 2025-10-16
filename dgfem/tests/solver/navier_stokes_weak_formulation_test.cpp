@@ -476,6 +476,8 @@ TEST(NavierStokesWeakFormulationTest, ShearFlowBoundaryFaceResidualMatchesAnalyt
                 Eigen::Vector4d bc_data = bc_ptr->evaluate(x_q);
                 switch (bc_ptr->get_type()) {
                 case BCTypeEuler::NO_SLIP_WALL:
+                case BCTypeEuler::INLET:
+                case BCTypeEuler::OUTLET:
                     U_bc = primitive_to_conserved(bc_data, gamma);
                     break;
                 case BCTypeEuler::FAR_FIELD:

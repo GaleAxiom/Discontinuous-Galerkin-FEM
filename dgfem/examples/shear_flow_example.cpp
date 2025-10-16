@@ -21,18 +21,29 @@
 #include <array>
 #include <iomanip>
 #include <iostream>
+#include <string_view>
 
 namespace {
 
 /**
  * @brief Analytic shear flow profile used for ICs and boundary conditions.
+ * 
+ * The velocity profile is u(y) = U_ref * y, with constant density and pressure.
+ * To ensure low Mach number (incompressible-like behavior), we use:
+ * - U_ref = 0.1 (reference velocity)
+ * - p = 10.0 (high pressure to reduce Mach number)
+ * - rho = 1.0 (reference density)
+ * This gives Mach ≈ 0.1 * 1 / sqrt(1.4 * 10) ≈ 0.027, which is nearly incompressible.
  */
 struct ShearFlowAnalytic {
     double gamma;
+    double U_ref = 0.1;   // Reference velocity scale (reduced for low Mach)
+    double p_ref = 10.0;  // Reference pressure (increased for low Mach)
+    double rho_ref = 1.0; // Reference density
 
     [[nodiscard]] Eigen::Vector4d primitive(const Eigen::Vector2d& x) const {
         Eigen::Vector4d W;
-        W << 1.0, x[1], 0.0, 1.0;
+        W << rho_ref, U_ref * x[1], 0.0, p_ref;
         return W;
     }
 
@@ -106,8 +117,8 @@ int main() {
 
         // Build a modest triangular mesh over [0, 1] x [0, 1] with P1 basis
         auto mesh = dgfem::MeshSetup::create_standard_mesh(
-            /*use_triangles=*/false,
-            /*order=*/2,
+            /*use_triangles=*/true,
+            /*order=*/1,
             /*dx=*/0.05,
             /*n_vars=*/4,
             /*xmin=*/0.0,
@@ -118,17 +129,39 @@ int main() {
 
         ShearFlowAnalytic exact{gamma};
 
-        // Apply shear-consistent far-field boundary conditions on all faces
-        auto shear_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
-            dgfem::BCTypeEuler::FAR_FIELD,
-            [exact](const Eigen::Vector2d& x) { return exact.conserved(x); });
-        for (const auto& [name, _] : mesh->get_boundary_tags()) {
-            mesh->set_boundary_condition_euler(name, shear_bc);
-        }
+        auto inlet_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
+            dgfem::BCTypeEuler::INLET,
+            [exact](const Eigen::Vector2d& x) { return exact.primitive(x); });
+        auto outlet_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
+            dgfem::BCTypeEuler::OUTLET,
+            [exact](const Eigen::Vector2d& x) { return exact.primitive(x); });
+        auto wall_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
+            dgfem::BCTypeEuler::NO_SLIP_WALL,
+            [exact](const Eigen::Vector2d& x) { return exact.primitive(x); });
+
+        auto apply_channel_bcs = [&](const std::shared_ptr<dgfem::BoundaryConditionEuler>& bc,
+                                     std::string_view tag) {
+            const auto& tags = mesh->get_boundary_tags();
+            auto it = tags.find(std::string(tag));
+            if (it != tags.end()) {
+                mesh->set_boundary_condition_euler(it->first, bc);
+            } else {
+                std::cerr << "Warning: boundary tag '" << tag
+                          << "' not found; skipping BC assignment." << std::endl;
+            }
+        };
+
+        apply_channel_bcs(inlet_bc, "Left");
+        apply_channel_bcs(outlet_bc, "Right");
+        apply_channel_bcs(wall_bc, "Bottom");
+        apply_channel_bcs(wall_bc, "Top");
+
         mesh->build_precomputed_faces();
-        for (const auto& [name, _] : mesh->get_boundary_tags()) {
-            mesh->set_boundary_condition_euler(name, shear_bc);
-        }
+
+        apply_channel_bcs(inlet_bc, "Left");
+        apply_channel_bcs(outlet_bc, "Right");
+        apply_channel_bcs(wall_bc, "Bottom");
+        apply_channel_bcs(wall_bc, "Top");
 
         // Time integration settings
         constexpr double dt = 1e-5;
@@ -159,7 +192,7 @@ int main() {
         }
 
         std::cout << "\n--- Exporting " << solutions.size() << " frames to VTK ---" << std::endl;
-        std::filesystem::path output_dir("../../output");
+        std::filesystem::path output_dir("output");
         std::error_code ec;
         std::filesystem::create_directories(output_dir, ec);
         if (ec) {

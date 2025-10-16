@@ -25,10 +25,12 @@ enum class BCType {
  * @brief Boundary condition types for Euler equations
  */
 enum class BCTypeEuler {
-    FAR_FIELD,     ///< Far-field BC
-    SLIP_WALL,     ///< Slip wall BC
-    NO_SLIP_WALL,  ///< No-slip wall BC (for future use)
-    PERIODIC       ///< Periodic BC
+    FAR_FIELD,     ///< Far-field BC specified in conserved variables
+    SLIP_WALL,     ///< Slip wall BC reflecting normal velocity
+    NO_SLIP_WALL,  ///< No-slip wall BC prescribed in primitive variables
+    PERIODIC,      ///< Periodic BC
+    INLET,         ///< Inlet BC prescribed in primitive variables
+    OUTLET         ///< Outlet BC prescribed in primitive variables
 };
 
 /**

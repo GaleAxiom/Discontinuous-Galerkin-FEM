@@ -376,26 +376,27 @@ void DGMesh::identify_boundary_faces(
                 (edge.first < edge.second) ? edge : std::make_pair(edge.second, edge.first);
             sig_to_tag[sig] = tag;
         }
+    }
 
-        // Identify all boundary faces and assign tag
-        for (int elem_id = 0; elem_id < n_elements_; ++elem_id) {
-            for (int face_id = 0; face_id < n_faces_per_elem_; ++face_id) {
-                if (face_neighbors_(elem_id, face_id * 2) == -1) {
-                    boundary_faces_.push_back({elem_id, face_id});
+    // Identify all boundary faces and assign the corresponding tag once
+    for (int elem_id = 0; elem_id < n_elements_; ++elem_id) {
+        for (int face_id = 0; face_id < n_faces_per_elem_; ++face_id) {
+            if (face_neighbors_(elem_id, face_id * 2) == -1) {
+                boundary_faces_.push_back({elem_id, face_id});
 
-                    // Get face vertices to create a signature
-                    const auto& vertices = face_to_vertices_.at({elem_id, face_id});
-                    int v1 = vertices[0];
-                    int v2 = vertices[1];
-                    std::pair<int, int> face_sig =
-                        (v1 < v2) ? std::make_pair(v1, v2) : std::make_pair(v2, v1);
+                // Get face vertices to create a signature
+                const auto& vertices = face_to_vertices_.at({elem_id, face_id});
+                int v1 = vertices[0];
+                int v2 = vertices[1];
+                std::pair<int, int> face_sig =
+                    (v1 < v2) ? std::make_pair(v1, v2) : std::make_pair(v2, v1);
 
-                    int tag = 0;  // Default tag if not found
-                    if (sig_to_tag.count(face_sig)) {
-                        tag = sig_to_tag.at(face_sig);
-                    }
-                    boundary_face_tags_[{elem_id, face_id}] = tag;
+                int tag = 0;  // Default tag if not found
+                auto tag_it = sig_to_tag.find(face_sig);
+                if (tag_it != sig_to_tag.end()) {
+                    tag = tag_it->second;
                 }
+                boundary_face_tags_[{elem_id, face_id}] = tag;
             }
         }
     }

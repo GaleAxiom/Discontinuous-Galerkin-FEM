@@ -225,6 +225,17 @@ Eigen::MatrixXd EulerWeakFormulation::boundary_face_residual(
         } else if (bc->get_type() == BCTypeEuler::NO_SLIP_WALL) {
             Eigen::Vector4d W_bc = bc->evaluate(x_q);
             U_R_q = primitive_to_conserved(W_bc, gamma_);
+        } else if (bc->get_type() == BCTypeEuler::INLET) {
+            Eigen::Vector4d W_bc = bc->evaluate(x_q);
+            U_R_q = primitive_to_conserved(W_bc, gamma_);
+        } else if (bc->get_type() == BCTypeEuler::OUTLET) {
+            Eigen::Vector4d W_bc = bc->evaluate(x_q);
+            Eigen::Vector4d W_R_q = W_L_q;
+            W_R_q[0] = W_bc[0];
+            W_R_q[1] = W_bc[1];
+            W_R_q[2] = W_bc[2];
+            W_R_q[3] = W_bc[3];
+            U_R_q = primitive_to_conserved(W_R_q, gamma_);
         } else if (bc->get_type() == BCTypeEuler::PERIODIC) {
             throw std::runtime_error("PERIODIC BC encountered in boundary_face_residual - periodic "
                                      "boundaries should be treated as interior faces");

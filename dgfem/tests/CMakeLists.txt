@@ -23,6 +23,7 @@ add_executable(dgfem_tests
     solver/p_convergence_test.cpp
     solver/time_dependent_test.cpp
     solver/navier_stokes_weak_formulation_test.cpp
+    solver/euler_boundary_conditions_test.cpp
     solver/shear_flow_accuracy_test.cpp
     solver/compressible_blasius_accuracy_test.cpp
     boundary/boundary_conditions_test.cpp
