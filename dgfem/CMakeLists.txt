@@ -65,7 +65,7 @@ add_library(dgfem ${DGFEM_SOURCES})
 
 # Compiler optimization flags
 target_compile_options(dgfem PRIVATE
-    $<$<CONFIG:Release>:-O3 -ffast-math>
+    $<$<CONFIG:Release>:-O3 -ffast-math -march=native>
     $<$<CONFIG:Debug>:-O0 -g>
 )
 

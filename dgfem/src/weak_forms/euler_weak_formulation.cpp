@@ -15,11 +15,17 @@
 
 namespace dgfem {
 
-EulerWeakFormulation::EulerWeakFormulation(double gamma) : gamma_(gamma) {}
+EulerWeakFormulation::EulerWeakFormulation(double gamma)
+    : gamma_(gamma), gamma_minus_one_(gamma - 1.0) {}
 
-std::tuple<Eigen::Vector4d, Eigen::Vector4d>
-EulerWeakFormulation::get_fluxes(const Eigen::Vector4d& U) const {
-    Eigen::Vector4d W = conserved_to_primitive(U, gamma_);
+// Helper struct to avoid redundant conversions
+struct FluxAndPrimitive {
+    Eigen::Vector4d F, G, W;
+};
+
+// Optimized: compute primitive variables AND fluxes in one pass
+static FluxAndPrimitive get_fluxes_and_primitive(const Eigen::Vector4d& U, double gamma) {
+    Eigen::Vector4d W = conserved_to_primitive(U, gamma);
     double rho = W[0];
     double u = W[1];
     double v = W[2];
@@ -31,23 +37,26 @@ EulerWeakFormulation::get_fluxes(const Eigen::Vector4d& U) const {
 
     Eigen::Vector4d F, G;
     F << rho_u, rho * u * u + p, rho * u * v, u * (E + p);
-
     G << rho_v, rho * u * v, rho * v * v + p, v * (E + p);
 
-    return std::make_tuple(F, G);
+    return {F, G, W};
+}
+
+std::tuple<Eigen::Vector4d, Eigen::Vector4d>
+EulerWeakFormulation::get_fluxes(const Eigen::Vector4d& U) const {
+    auto result = get_fluxes_and_primitive(U, gamma_);
+    return {result.F, result.G};
 }
 
 Eigen::Vector4d EulerWeakFormulation::rusanov_flux(const Eigen::Vector4d& U_L,
                                                    const Eigen::Vector4d& U_R,
                                                    const Eigen::Vector2d& normal) const {
-    auto [F_L, G_L] = get_fluxes(U_L);
-    auto [F_R, G_R] = get_fluxes(U_R);
+    // OPTIMIZATION: Single conversion per state (was 2x before)
+    auto [F_L, G_L, W_L] = get_fluxes_and_primitive(U_L, gamma_);
+    auto [F_R, G_R, W_R] = get_fluxes_and_primitive(U_R, gamma_);
 
     Eigen::Vector4d Fn_L = F_L * normal[0] + G_L * normal[1];
     Eigen::Vector4d Fn_R = F_R * normal[0] + G_R * normal[1];
-
-    Eigen::Vector4d W_L = conserved_to_primitive(U_L, gamma_);
-    Eigen::Vector4d W_R = conserved_to_primitive(U_R, gamma_);
 
     double c_L = std::sqrt(gamma_ * W_L[3] / W_L[0]);  // speed of sound
     double c_R = std::sqrt(gamma_ * W_R[3] / W_R[0]);
@@ -64,36 +73,42 @@ Eigen::MatrixXd
 EulerWeakFormulation::volume_residual(const Eigen::MatrixXd& u_coeffs_elem,
                                       const std::map<std::string, Eigen::MatrixXd>& elem_data,
                                       std::shared_ptr<DGSpace> dg_space) const {
-    int n_basis = dg_space->get_basis()->get_n_basis();
-    int n_vars = u_coeffs_elem.cols();
+    const int n_basis = dg_space->get_basis()->get_n_basis();
+    const int n_vars = u_coeffs_elem.cols();  // Should be 4
     Eigen::MatrixXd R_vol = Eigen::MatrixXd::Zero(n_basis, n_vars);
 
+    // Get references to data to avoid map lookups in the loop
     const Eigen::VectorXd& weights = dg_space->get_volume_quad()->weights;
     const Eigen::VectorXd& J_det = elem_data.at("J_det_vol");
     const Eigen::MatrixXd& phi = dg_space->get_volume_basis_values();
     const Eigen::MatrixXd& dphi_dx = elem_data.at("dphi_dx_vol");
 
-    int n_quad = weights.size();
+    const int n_quad = static_cast<int>(weights.size());
+
+    // OPTIMIZATION: Pre-compute physical weights (avoid repeated computation)
+    const Eigen::ArrayXd w_phys = weights.array() * J_det.array().abs();
+
+    // Pre-calculate all solution values at all quadrature points
+    // This is one large, efficient matrix-matrix multiplication.
+    // U_quad_points has shape (n_quad, n_vars), where each row is a U_q
+    const Eigen::MatrixXd U_quad_points = phi * u_coeffs_elem;
 
     for (int q = 0; q < n_quad; ++q) {
-        // Compute solution at quadrature point
-        Eigen::Vector4d U_q = Eigen::Vector4d::Zero();
-        for (int i = 0; i < n_basis; ++i) {
-            U_q += phi(q, i) * u_coeffs_elem.row(i).transpose();
-        }
+        // U_q is now a simple row lookup
+        const Eigen::Vector4d U_q = U_quad_points.row(q).transpose();
 
         // Get fluxes
         auto [F_q, G_q] = get_fluxes(U_q);
 
-        double w_q_phys = weights[q] * std::abs(J_det[q]);
+        // Get all gradient components for basis functions at this quad point 'q'
+        // This is a view (no data copied) into the dphi_dx matrix.
+        // It has shape (n_basis, 2)
+        const auto grad_phi_q = dphi_dx.block(q * n_basis, 0, n_basis, 2);
 
-        // R_vol[i,v] += w * (F_q[v]*dphi_dx[q,i,0] + G_q[v]*dphi_dx[q,i,1])
-        for (int i = 0; i < n_basis; ++i) {
-            Eigen::Vector2d grad_phi_i;
-            grad_phi_i << dphi_dx(q * n_basis + i, 0), dphi_dx(q * n_basis + i, 1);
+        const double w = w_phys[q];
 
-            R_vol.row(i) += w_q_phys * (F_q * grad_phi_i[0] + G_q * grad_phi_i[1]).transpose();
-        }
+        // Vectorized outer-product update
+        R_vol += w * (grad_phi_q.col(0) * F_q.transpose() + grad_phi_q.col(1) * G_q.transpose());
     }
 
     return R_vol;
@@ -104,42 +119,55 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXd> EulerWeakFormulation::interior_face
     const std::map<std::string, Eigen::MatrixXd>& face_data_L,
     const std::map<std::string, Eigen::MatrixXd>& face_data_R, std::shared_ptr<DGSpace> dg_space,
     const Eigen::VectorXi& permutation) const {
-    int n_basis = dg_space->get_basis()->get_n_basis();
-    int n_vars = u_coeffs_L.cols();
+    // --- Setup is the same ---
+    const int n_basis = dg_space->get_basis()->get_n_basis();
+    const int n_vars = u_coeffs_L.cols();  // This will be 4
     Eigen::MatrixXd R_face_L = Eigen::MatrixXd::Zero(n_basis, n_vars);
     Eigen::MatrixXd R_face_R = Eigen::MatrixXd::Zero(n_basis, n_vars);
 
-    const Eigen::VectorXd weights = face_data_L.at("weights").col(0);
+    const Eigen::VectorXd& weights = face_data_L.at("weights");
     const Eigen::MatrixXd& phi_L = face_data_L.at("phi");
     const Eigen::MatrixXd& phi_R = face_data_R.at("phi");
-    const Eigen::Vector2d normal = face_data_L.at("normal").col(0);
-    double hF = face_data_L.at("length")(0, 0);
+    const Eigen::Vector2d& normal = face_data_L.at("normal").col(0);
+    const double hF = face_data_L.at("length")(0, 0);
+    const int n_quad = weights.size();
 
-    int n_quad = weights.size();
+    // U_L_q and U_R_q are small and will live on the stack.
+    Eigen::Vector4d U_L_q, U_R_q;
 
     for (int q = 0; q < n_quad; ++q) {
-        // Compute solution at quadrature point from both sides
-        Eigen::Vector4d U_L_q = Eigen::Vector4d::Zero();
-        Eigen::Vector4d U_R_q = Eigen::Vector4d::Zero();
+        U_L_q.setZero();
+        U_R_q.setZero();
+        const int idx_R_q = (permutation.size() > 0) ? permutation[q] : q;
 
+        // --- OPTIMIZATION 1: Manual loop for U Computation ---
+        // Access coefficients directly to avoid .row() and .transpose() overhead.
         for (int i = 0; i < n_basis; ++i) {
-            U_L_q += phi_L(q, i) * u_coeffs_L.row(i).transpose();
-
-            int idx_R = (permutation.size() > 0) ? permutation[q] : q;
-            U_R_q += phi_R(idx_R, i) * u_coeffs_R.row(i).transpose();
+            const double p_L = phi_L(q, i);
+            const double p_R = phi_R(idx_R_q, i);
+            // This inner loop over 'v' will be unrolled and vectorized by the compiler.
+            for (int v = 0; v < n_vars; ++v) {
+                U_L_q[v] += p_L * u_coeffs_L(i, v);
+                U_R_q[v] += p_R * u_coeffs_R(i, v);
+            }
         }
 
-        // Compute numerical flux
-        Eigen::Vector4d H_q = rusanov_flux(U_L_q, U_R_q, normal);
+        // --- Flux calculation is unchanged ---
+        const Eigen::Vector4d H_q = rusanov_flux(U_L_q, U_R_q, normal);
+        const double w_q_phys = weights[q] * hF * 0.5;
 
-        double w_q_phys = weights[q] * hF * 0.5;
-
-        // Update residuals
+        // --- OPTIMIZATION 2: Manual loop for Residual Update ---
+        // Again, direct coefficient access is key.
         for (int i = 0; i < n_basis; ++i) {
-            R_face_L.row(i) -= w_q_phys * phi_L(q, i) * H_q.transpose();
-
-            int idx_R = (permutation.size() > 0) ? permutation[q] : q;
-            R_face_R.row(i) += w_q_phys * phi_R(idx_R, i) * H_q.transpose();
+            const double p_L = phi_L(q, i);
+            const double p_R = phi_R(idx_R_q, i);
+            const double scale_L = w_q_phys * p_L;
+            const double scale_R = w_q_phys * p_R;
+            // The compiler will vectorize this loop over 'v' perfectly.
+            for (int v = 0; v < n_vars; ++v) {
+                R_face_L(i, v) -= scale_L * H_q[v];
+                R_face_R(i, v) += scale_R * H_q[v];
+            }
         }
     }
 
@@ -149,29 +177,30 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXd> EulerWeakFormulation::interior_face
 Eigen::MatrixXd EulerWeakFormulation::boundary_face_residual(
     const Eigen::MatrixXd& u_coeffs, const std::map<std::string, Eigen::MatrixXd>& face_data,
     std::shared_ptr<BoundaryConditionEuler> bc, std::shared_ptr<DGSpace> dg_space) const {
-    int n_basis = dg_space->get_basis()->get_n_basis();
-    int n_vars = u_coeffs.cols();
+    const int n_basis = dg_space->get_basis()->get_n_basis();
+    const int n_vars = u_coeffs.cols();
     Eigen::MatrixXd R_face_bc = Eigen::MatrixXd::Zero(n_basis, n_vars);
 
-    const Eigen::VectorXd weights = face_data.at("weights").col(0);
+    const Eigen::VectorXd& weights = face_data.at("weights").col(0);
     const Eigen::MatrixXd& phi = face_data.at("phi");
-    const Eigen::Vector2d normal = face_data.at("normal").col(0);
-    double hF = face_data.at("length")(0, 0);
-    const Eigen::MatrixXd quad_points_mat = face_data.at("quad_points");
+    const Eigen::Vector2d& normal = face_data.at("normal").col(0);
+    const double hF = face_data.at("length")(0, 0);
+    const Eigen::MatrixXd& quad_points_mat = face_data.at("quad_points");
 
-    // Reshape quad_points from column vector to matrix
-    int n_quad = weights.size();
-    Eigen::MatrixXd quad_points(n_quad, 2);
-    for (int q = 0; q < n_quad; ++q) {
-        quad_points(q, 0) = quad_points_mat(q * 2, 0);
-        quad_points(q, 1) = quad_points_mat(q * 2 + 1, 0);
-    }
+    // OPTIMIZATION: Zero-copy reshape using Eigen::Map
+    const int n_quad = static_cast<int>(weights.size());
+    const double* qp_data = quad_points_mat.data();
+    Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, 2, Eigen::RowMajor>> quad_points(
+        qp_data, n_quad, 2);
 
     for (int q = 0; q < n_quad; ++q) {
-        // Compute interior solution at quadrature point
+        // OPTIMIZATION: Use manual loop to avoid .row().transpose() overhead
         Eigen::Vector4d U_L_q = Eigen::Vector4d::Zero();
         for (int i = 0; i < n_basis; ++i) {
-            U_L_q += phi(q, i) * u_coeffs.row(i).transpose();
+            const double phi_val = phi(q, i);
+            for (int v = 0; v < n_vars; ++v) {
+                U_L_q[v] += phi_val * u_coeffs(i, v);
+            }
         }
 
         Eigen::Vector4d W_L_q = conserved_to_primitive(U_L_q, gamma_);
@@ -204,13 +233,16 @@ Eigen::MatrixXd EulerWeakFormulation::boundary_face_residual(
         }
 
         // Compute numerical flux
-        Eigen::Vector4d H_q = rusanov_flux(U_L_q, U_R_q, normal);
+        const Eigen::Vector4d H_q = rusanov_flux(U_L_q, U_R_q, normal);
 
-        double w_q_phys = weights[q] * hF * 0.5;
+        const double w_q_phys = weights[q] * hF * 0.5;
 
-        // Update residual
+        // OPTIMIZATION: Manual loop to avoid .row() overhead
         for (int i = 0; i < n_basis; ++i) {
-            R_face_bc.row(i) -= w_q_phys * phi(q, i) * H_q.transpose();
+            const double scale = w_q_phys * phi(q, i);
+            for (int v = 0; v < n_vars; ++v) {
+                R_face_bc(i, v) -= scale * H_q[v];
+            }
         }
     }
 
@@ -227,12 +259,13 @@ void EulerWeakFormulation::assemble(DGAssembler& assembler,
 
 // Utility functions for Euler equations
 Eigen::Vector4d primitive_to_conserved(const Eigen::Vector4d& primitive, double gamma) {
-    double rho = primitive[0];
-    double u = primitive[1];
-    double v = primitive[2];
-    double p = primitive[3];
+    const double rho = primitive[0];
+    const double u = primitive[1];
+    const double v = primitive[2];
+    const double p = primitive[3];
 
-    double E = p / (gamma - 1.0) + 0.5 * rho * (u * u + v * v);
+    const double gamma_m1 = gamma - 1.0;
+    const double E = p / gamma_m1 + 0.5 * rho * (u * u + v * v);
 
     Eigen::Vector4d conserved;
     conserved[0] = rho;
@@ -244,14 +277,14 @@ Eigen::Vector4d primitive_to_conserved(const Eigen::Vector4d& primitive, double 
 }
 
 Eigen::Vector4d conserved_to_primitive(const Eigen::Vector4d& conserved, double gamma) {
-    double rho = conserved[0];
-    double rho_u = conserved[1];
-    double rho_v = conserved[2];
-    double E = conserved[3];
+    const double rho = conserved[0];
+    const double rho_inv = 1.0 / rho;  // Single division
 
-    double u = rho_u / rho;
-    double v = rho_v / rho;
-    double p = (gamma - 1.0) * (E - 0.5 * rho * (u * u + v * v));
+    const double u = conserved[1] * rho_inv;  // Multiply instead of divide
+    const double v = conserved[2] * rho_inv;  // Multiply instead of divide
+
+    const double gamma_m1 = gamma - 1.0;
+    const double p = gamma_m1 * (conserved[3] - 0.5 * rho * (u * u + v * v));
 
     Eigen::Vector4d primitive;
     primitive[0] = rho;

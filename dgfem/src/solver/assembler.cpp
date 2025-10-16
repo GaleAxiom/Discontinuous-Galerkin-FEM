@@ -134,44 +134,66 @@ void DGAssembler::finalize_assembly() {
     system_matrix_.makeCompressed();
 }
 
-std::vector<Eigen::MatrixXd>
-DGAssembler::assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_coeffs) {
-    if (!euler_weak_form_) {
-        throw std::runtime_error("Euler weak formulation not set");
-    }
+void DGAssembler::assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_coeffs,
+                                          std::vector<Eigen::MatrixXd>& residuals_out) {
+    // if (!euler_weak_form_) {
+    //     throw std::runtime_error("Euler weak formulation not set");
+    // }
 
     static int call_count = 0;
-    static double total_vol_time = 0.0;
-    static double total_face_time = 0.0;
+    static double total_resize_time = 0.0;
+    static double total_volume_time = 0.0;
+    static double total_visc_volume_time = 0.0;
+    static double total_interior_face_time = 0.0;
+    static double total_interior_visc_time = 0.0;
+    static double total_boundary_face_time = 0.0;
+    static double total_boundary_visc_time = 0.0;
 
     int n_elem = mesh_->get_n_elements();
     int n_basis = dg_space_->get_basis()->get_n_basis();
     int n_vars = 4;  // [rho, rho*u, rho*v, E]
 
-    std::vector<Eigen::MatrixXd> residuals(n_elem, Eigen::MatrixXd::Zero(n_basis, n_vars));
+    {
+        auto resize_start = std::chrono::high_resolution_clock::now();
+        residuals_out.resize(n_elem);
+        for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
+            auto& elem_residual = residuals_out[elem_id];
+            if (elem_residual.rows() != n_basis || elem_residual.cols() != n_vars) {
+                elem_residual.resize(n_basis, n_vars);
+            }
+            elem_residual.setZero();
+        }
+        auto resize_end = std::chrono::high_resolution_clock::now();
+        total_resize_time += std::chrono::duration<double>(resize_end - resize_start).count();
+    }
 
     // Volume contributions
     auto vol_start = std::chrono::high_resolution_clock::now();
     for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
         const auto& elem_data = mesh_->get_element_data(elem_id);
-        residuals[elem_id] =
+        residuals_out[elem_id] =
             euler_weak_form_->volume_residual(u_coeffs[elem_id], elem_data, dg_space_);
     }
+    auto vol_end = std::chrono::high_resolution_clock::now();
+    total_volume_time += std::chrono::duration<double>(vol_end - vol_start).count();
 
-    if (euler_weak_form_->has_viscous_terms()) {
+    const bool has_viscous_terms = euler_weak_form_->has_viscous_terms();
+
+    if (has_viscous_terms) {
+        auto visc_vol_start = std::chrono::high_resolution_clock::now();
         for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
             const auto& elem_data = mesh_->get_element_data(elem_id);
-            residuals[elem_id] +=
+            residuals_out[elem_id] +=
                 euler_weak_form_->viscous_volume_residual(u_coeffs[elem_id], elem_data, dg_space_);
         }
+        auto visc_vol_end = std::chrono::high_resolution_clock::now();
+        total_visc_volume_time +=
+            std::chrono::duration<double>(visc_vol_end - visc_vol_start).count();
     }
-    auto vol_end = std::chrono::high_resolution_clock::now();
-    total_vol_time += std::chrono::duration<double>(vol_end - vol_start).count();
 
     // Face contributions - using precomputed face data
-    auto face_start = std::chrono::high_resolution_clock::now();
-
     // Process interior faces
+    auto interior_face_start = std::chrono::high_resolution_clock::now();
     const auto& interior_faces = mesh_->get_interior_faces();
     for (const auto& face : interior_faces) {
         const auto& face_data_L = mesh_->get_element_face_data(face.elem_L, face.face_L);
@@ -181,19 +203,32 @@ DGAssembler::assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_coeff
             u_coeffs[face.elem_L], u_coeffs[face.elem_R], face_data_L, face_data_R, dg_space_,
             face.permutation);
 
-        residuals[face.elem_L] += R_face_L;
-        residuals[face.elem_R] += R_face_R;
+        residuals_out[face.elem_L] += R_face_L;
+        residuals_out[face.elem_R] += R_face_R;
+    }
+    auto interior_face_end = std::chrono::high_resolution_clock::now();
+    total_interior_face_time +=
+        std::chrono::duration<double>(interior_face_end - interior_face_start).count();
 
-        if (euler_weak_form_->has_viscous_terms()) {
+    if (has_viscous_terms) {
+        auto interior_visc_start = std::chrono::high_resolution_clock::now();
+        for (const auto& face : interior_faces) {
+            const auto& face_data_L = mesh_->get_element_face_data(face.elem_L, face.face_L);
+            const auto& face_data_R = mesh_->get_element_face_data(face.elem_R, face.face_R);
+
             auto [R_visc_L, R_visc_R] = euler_weak_form_->viscous_interior_face_residual(
                 u_coeffs[face.elem_L], u_coeffs[face.elem_R], face_data_L, face_data_R, dg_space_,
                 face.permutation);
-            residuals[face.elem_L] += R_visc_L;
-            residuals[face.elem_R] += R_visc_R;
+            residuals_out[face.elem_L] += R_visc_L;
+            residuals_out[face.elem_R] += R_visc_R;
         }
+        auto interior_visc_end = std::chrono::high_resolution_clock::now();
+        total_interior_visc_time +=
+            std::chrono::duration<double>(interior_visc_end - interior_visc_start).count();
     }
 
     // Process boundary faces
+    auto boundary_face_start = std::chrono::high_resolution_clock::now();
     const auto& boundary_faces = mesh_->get_boundary_face_data();
     for (const auto& face : boundary_faces) {
         if (face.bc_euler) {
@@ -201,29 +236,46 @@ DGAssembler::assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_coeff
             Eigen::MatrixXd R_face_bc = euler_weak_form_->boundary_face_residual(
                 u_coeffs[face.elem_L], face_data, face.bc_euler, dg_space_);
 
-            residuals[face.elem_L] += R_face_bc;
-
-            if (euler_weak_form_->has_viscous_terms()) {
-                Eigen::MatrixXd R_visc_bc = euler_weak_form_->viscous_boundary_face_residual(
-                    u_coeffs[face.elem_L], face_data, face.bc_euler, dg_space_);
-                residuals[face.elem_L] += R_visc_bc;
-            }
+            residuals_out[face.elem_L] += R_face_bc;
         }
     }
+    auto boundary_face_end = std::chrono::high_resolution_clock::now();
+    total_boundary_face_time +=
+        std::chrono::duration<double>(boundary_face_end - boundary_face_start).count();
 
-    auto face_end = std::chrono::high_resolution_clock::now();
-    total_face_time += std::chrono::duration<double>(face_end - face_start).count();
+    if (has_viscous_terms) {
+        auto boundary_visc_start = std::chrono::high_resolution_clock::now();
+        for (const auto& face : boundary_faces) {
+            if (face.bc_euler) {
+                const auto& face_data = mesh_->get_element_face_data(face.elem_L, face.face_L);
+                Eigen::MatrixXd R_visc_bc = euler_weak_form_->viscous_boundary_face_residual(
+                    u_coeffs[face.elem_L], face_data, face.bc_euler, dg_space_);
+                residuals_out[face.elem_L] += R_visc_bc;
+            }
+        }
+        auto boundary_visc_end = std::chrono::high_resolution_clock::now();
+        total_boundary_visc_time +=
+            std::chrono::duration<double>(boundary_visc_end - boundary_visc_start).count();
+    }
 
     call_count++;
     // Print timing every 300 calls (100 time steps * 3 RK stages)
     if (call_count % 300 == 0) {
-        std::cout << "[TIMER] Residual assembly (" << call_count
-                  << " calls): " << "Volume=" << std::fixed << std::setprecision(4)
-                  << total_vol_time << "s, " << "Face=" << total_face_time << "s, "
-                  << "Total=" << (total_vol_time + total_face_time) << "s" << std::endl;
-    }
+        double total_face_time = total_interior_face_time + total_interior_visc_time +
+                                 total_boundary_face_time + total_boundary_visc_time;
+        double total_volume = total_volume_time + total_visc_volume_time;
+        double grand_total = total_resize_time + total_volume + total_face_time;
 
-    return residuals;
+        std::cout << "[TIMER] Residual assembly (" << call_count << " calls): "
+                  << "Resize=" << std::fixed << std::setprecision(4) << total_resize_time << "s, "
+                  << "Vol=" << total_volume_time << "s, "
+                  << "ViscVol=" << total_visc_volume_time << "s, "
+                  << "IntFace=" << total_interior_face_time << "s, "
+                  << "IntVisc=" << total_interior_visc_time << "s, "
+                  << "BndFace=" << total_boundary_face_time << "s, "
+                  << "BndVisc=" << total_boundary_visc_time << "s, "
+                  << "Total=" << grand_total << "s" << std::endl;
+    }
 }
 
 }  // namespace dgfem

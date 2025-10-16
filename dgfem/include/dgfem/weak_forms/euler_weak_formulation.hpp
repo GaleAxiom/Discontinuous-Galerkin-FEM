@@ -126,8 +126,9 @@ public:
 
     [[nodiscard]] double get_gamma() const noexcept { return gamma_; }
 
-private:
-    double gamma_;  ///< Ratio of specific heats
+protected:
+    double gamma_;            ///< Ratio of specific heats
+    double gamma_minus_one_;  ///< Cached gamma - 1.0 for performance
 };
 
 // Utility functions for Euler equations

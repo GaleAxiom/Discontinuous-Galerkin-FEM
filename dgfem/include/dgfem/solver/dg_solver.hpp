@@ -17,6 +17,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "assembler.hpp"
@@ -240,6 +241,8 @@ protected:
     [[nodiscard]] std::vector<Eigen::MatrixXd>
     run_time_integration(std::function<Eigen::Vector4d(const Eigen::Vector2d&)> initial_condition,
                          double T_final, double dt, int save_every);
+    [[nodiscard]] std::pair<double, double>
+    compute_density_range(const StateVector& u_coeffs) const;
 
     std::shared_ptr<EulerWeakFormulation> weak_form_;
     double gamma_;
@@ -247,6 +250,7 @@ protected:
 private:
     std::vector<Eigen::MatrixXd> M_inv_blocks_;
     std::string solver_label_;
+    mutable StateVector residual_buffer_;
 
     [[nodiscard]] std::vector<Eigen::MatrixXd>
     flatten_frames(const std::vector<StateVector>& frames) const;

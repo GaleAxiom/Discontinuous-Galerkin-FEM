@@ -4,7 +4,11 @@
 #include <dgfem/solver/dg_solver.hpp>
 #include <dgfem/solver/weak_form.hpp>
 
+#include <algorithm>
 #include <array>
+#include <chrono>
+#include <iostream>
+#include <limits>
 #include <stdexcept>
 
 #include <gmock/gmock.h>
@@ -522,7 +526,8 @@ TEST(NavierStokesWeakFormulationTest, NoSlipBoundaryGeneratesResidual) {
         u_coeffs[elem] = make_constant_coeffs(n_basis, uniform_conserved);
     }
 
-    auto residuals = assembler->assemble_euler_residual(u_coeffs);
+    std::vector<Eigen::MatrixXd> residuals;
+    assembler->assemble_euler_residual(u_coeffs, residuals);
     double total_norm = 0.0;
     for (const auto& R_elem : residuals) {
         total_norm += R_elem.norm();
@@ -538,4 +543,107 @@ TEST(NavierStokesWeakFormulationTest, NavierStokesSolverConstructs) {
     NavierStokesDGSolver solver(mesh, 1.4, 1.0e-3, 0.72, 5.0);
     const auto& system_matrix = solver.get_system_matrix();
     EXPECT_EQ(system_matrix.rows(), system_matrix.cols());
+}
+
+TEST(NavierStokesWeakFormulationTest, EulerVolumeResidualPerformance) {
+    const double gamma = 1.4;
+    auto mesh = create_test_mesh();
+    // Use a moderately high polynomial order and quadrature count to stress the kernel
+    constexpr int poly_order = 4;
+    constexpr int quad_level = 6;
+    auto space = std::make_shared<DGSpace>(mesh->get_element_type(), poly_order);
+    mesh->initialize_dg_space(space, quad_level);
+
+    auto weak_form = std::make_shared<EulerWeakFormulation>(gamma);
+    const int n_elements = mesh->get_n_elements();
+    const int n_basis = space->get_basis()->get_n_basis();
+    const int n_vars = weak_form->get_n_vars();
+
+    std::vector<Eigen::MatrixXd> u_coeffs(n_elements);
+    for (int elem = 0; elem < n_elements; ++elem) {
+        Eigen::Vector4d state;
+        state << 1.0 + 0.1 * elem, 0.5, 0.25, 1.0 + 0.05 * elem;
+        u_coeffs[elem] = make_constant_coeffs(n_basis, state);
+    }
+
+    // Warm up caches
+    for (int elem = 0; elem < n_elements; ++elem) {
+        const auto& elem_data = mesh->get_element_data(elem);
+        (void)weak_form->volume_residual(u_coeffs[elem], elem_data, space);
+    }
+
+    const int iterations = 10000;
+    double best_time = std::numeric_limits<double>::max();
+
+    for (int iter = 0; iter < iterations; ++iter) {
+        const auto start = std::chrono::high_resolution_clock::now();
+        for (int elem = 0; elem < n_elements; ++elem) {
+            const auto& elem_data = mesh->get_element_data(elem);
+            (void)weak_form->volume_residual(u_coeffs[elem], elem_data, space);
+        }
+        const auto end = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double, std::micro>(end - start).count();
+        best_time = std::min(best_time, elapsed);
+    }
+
+    const double avg_time_per_elem = best_time / static_cast<double>(n_elements);
+    // Guard against non-sensical (negative) timings while keeping the assertion loose enough
+    EXPECT_GT(avg_time_per_elem, 0.0);
+    // For CI visibility, log the measured time in microseconds per element
+    std::cout << "[PERF] Euler volume residual: order=" << poly_order
+              << ", best_time_per_elem_us=" << avg_time_per_elem << std::endl;
+}
+
+TEST(NavierStokesWeakFormulationTest, EulerInteriorFaceResidualPerformance) {
+    const double gamma = 1.4;
+    auto mesh = create_test_mesh();
+    constexpr int poly_order = 4;
+    constexpr int quad_level = 6;
+    auto space = std::make_shared<DGSpace>(mesh->get_element_type(), poly_order);
+    mesh->initialize_dg_space(space, quad_level);
+
+    auto weak_form = std::make_shared<EulerWeakFormulation>(gamma);
+    const auto& interior_faces = mesh->get_interior_faces();
+    ASSERT_FALSE(interior_faces.empty());
+
+    const int n_elements = mesh->get_n_elements();
+    const int n_basis = space->get_basis()->get_n_basis();
+
+    std::vector<Eigen::MatrixXd> u_coeffs(n_elements);
+    for (int elem = 0; elem < n_elements; ++elem) {
+        Eigen::Vector4d state;
+        state << 1.0 + 0.05 * elem, 0.25 + 0.1 * elem, -0.15 * elem, 1.0 + 0.02 * elem;
+        u_coeffs[elem] = make_constant_coeffs(n_basis, state);
+    }
+
+    for (const auto& face : interior_faces) {
+        const auto& face_data_L = mesh->get_element_face_data(face.elem_L, face.face_L);
+        const auto& face_data_R = mesh->get_element_face_data(face.elem_R, face.face_R);
+        (void)weak_form->interior_face_residual(u_coeffs[face.elem_L], u_coeffs[face.elem_R],
+                                                face_data_L, face_data_R, space, face.permutation);
+    }
+
+    constexpr int iterations = 20;
+    double best_time = std::numeric_limits<double>::max();
+    volatile double sink = 0.0;
+
+    for (int iter = 0; iter < iterations; ++iter) {
+        const auto start = std::chrono::high_resolution_clock::now();
+        for (const auto& face : interior_faces) {
+            const auto& face_data_L = mesh->get_element_face_data(face.elem_L, face.face_L);
+            const auto& face_data_R = mesh->get_element_face_data(face.elem_R, face.face_R);
+            auto [R_face_L, R_face_R] = weak_form->interior_face_residual(
+                u_coeffs[face.elem_L], u_coeffs[face.elem_R], face_data_L, face_data_R, space,
+                face.permutation);
+            sink += R_face_L(0, 0) + R_face_R(0, 0);
+        }
+        const auto end = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double, std::micro>(end - start).count();
+        best_time = std::min(best_time, elapsed);
+    }
+
+    const double avg_time_per_face = best_time / static_cast<double>(interior_faces.size());
+    EXPECT_GT(avg_time_per_face, 0.0);
+    std::cout << "[PERF] Euler interior face residual: order=" << poly_order
+              << ", best_time_per_face_us=" << avg_time_per_face << ", sink=" << sink << std::endl;
 }
