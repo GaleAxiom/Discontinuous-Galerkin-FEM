@@ -108,7 +108,8 @@ TEST_F(NavierStokesShearFlowAccuracyTest, MaintainsManufacturedShearProfile) {
     auto outlet_bc = std::make_shared<BoundaryConditionEuler>(
         BCTypeEuler::OUTLET, [exact](const Eigen::Vector2d& x) { return exact.primitive(x); });
     auto wall_bc = std::make_shared<BoundaryConditionEuler>(
-        BCTypeEuler::NO_SLIP_WALL, [exact](const Eigen::Vector2d& x) { return exact.primitive(x); });
+        BCTypeEuler::NO_SLIP_WALL,
+        [exact](const Eigen::Vector2d& x) { return exact.primitive(x); });
 
     const auto& tags = mesh->get_boundary_tags();
     const auto set_bc_if_exists = [&](std::string_view tag,

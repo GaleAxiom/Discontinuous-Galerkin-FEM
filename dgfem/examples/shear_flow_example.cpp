@@ -27,7 +27,7 @@ namespace {
 
 /**
  * @brief Analytic shear flow profile used for ICs and boundary conditions.
- * 
+ *
  * The velocity profile is u(y) = U_ref * y, with constant density and pressure.
  * To ensure low Mach number (incompressible-like behavior), we use:
  * - U_ref = 0.1 (reference velocity)
@@ -37,9 +37,9 @@ namespace {
  */
 struct ShearFlowAnalytic {
     double gamma;
-    double U_ref = 0.1;   // Reference velocity scale (reduced for low Mach)
-    double p_ref = 10.0;  // Reference pressure (increased for low Mach)
-    double rho_ref = 1.0; // Reference density
+    double U_ref = 0.1;    // Reference velocity scale (reduced for low Mach)
+    double p_ref = 10.0;   // Reference pressure (increased for low Mach)
+    double rho_ref = 1.0;  // Reference density
 
     [[nodiscard]] Eigen::Vector4d primitive(const Eigen::Vector2d& x) const {
         Eigen::Vector4d W;

@@ -3,13 +3,13 @@
  * @brief Comprehensive tests for all Euler boundary condition types
  */
 
+#include <cmath>
 #include <dgfem/boundary/conditions.hpp>
 #include <dgfem/core/mesh.hpp>
 #include <dgfem/core/space.hpp>
 #include <dgfem/solver/weak_form.hpp>
 #include <dgfem/utils/mesh_creation.hpp>
 
-#include <cmath>
 #include <memory>
 
 #include <gmock/gmock.h>
@@ -153,7 +153,8 @@ TEST_F(EulerBoundaryConditionsTest, FarFieldBCResidual) {
                 break;
             }
         }
-        if (boundary_elem >= 0) break;
+        if (boundary_elem >= 0)
+            break;
     }
 
     ASSERT_GE(boundary_elem, 0) << "No boundary face found";
@@ -173,22 +174,23 @@ TEST_F(EulerBoundaryConditionsTest, FarFieldBCResidual) {
     EXPECT_TRUE(R_face.allFinite());
     EXPECT_EQ(R_face.rows(), n_basis);
     EXPECT_EQ(R_face.cols(), 4);
-    
+
     // The residual norm should be consistent with the flux magnitude
     double flux_magnitude = std::abs(u * normal[0] + v * normal[1]);
     EXPECT_GT(R_face.norm(), flux_magnitude * 0.1);  // At least 10% of velocity-based flux
-    EXPECT_LT(R_face.norm(), 10.0);  // Reasonable upper bound
-    
+    EXPECT_LT(R_face.norm(), 10.0);                  // Reasonable upper bound
+
     // Test with zero velocity - should still have pressure flux
     Eigen::Vector4d U_zero = make_uniform_conserved(rho, 0.0, 0.0, p, gamma_);
     auto bc_zero = std::make_shared<BoundaryConditionEuler>(BCTypeEuler::FAR_FIELD, U_zero);
     set_all_boundaries(mesh, bc_zero);
     Eigen::MatrixXd u_coeffs_zero = make_constant_coeffs(n_basis, U_zero);
-    Eigen::MatrixXd R_zero = weak_form_->boundary_face_residual(u_coeffs_zero, face_data, bc_zero, space);
-    
+    Eigen::MatrixXd R_zero =
+        weak_form_->boundary_face_residual(u_coeffs_zero, face_data, bc_zero, space);
+
     // With zero velocity, only pressure contribution remains
     EXPECT_TRUE(R_zero.allFinite());
-    EXPECT_GT(R_zero.norm(), 1e-12);  // Non-zero due to pressure
+    EXPECT_GT(R_zero.norm(), 1e-12);          // Non-zero due to pressure
     EXPECT_LT(R_zero.norm(), R_face.norm());  // Should be less than with velocity
 }
 
@@ -225,7 +227,8 @@ TEST_F(EulerBoundaryConditionsTest, SlipWallBCNormalVelocityReflection) {
                 break;
             }
         }
-        if (boundary_elem >= 0) break;
+        if (boundary_elem >= 0)
+            break;
     }
 
     ASSERT_GE(boundary_elem, 0) << "No boundary face found";
@@ -243,7 +246,8 @@ TEST_F(EulerBoundaryConditionsTest, SlipWallBCNormalVelocityReflection) {
 
     // Compute boundary face residual
     auto face_data = mesh->get_element_face_data(boundary_elem, boundary_face);
-    Eigen::MatrixXd R_face = weak_form_->boundary_face_residual(u_coeffs, face_data, slip_bc, space);
+    Eigen::MatrixXd R_face =
+        weak_form_->boundary_face_residual(u_coeffs, face_data, slip_bc, space);
 
     // Residual should be finite (not zero, as velocity is reflected)
     EXPECT_GT(R_face.norm(), 1e-12);
@@ -270,7 +274,8 @@ TEST_F(EulerBoundaryConditionsTest, SlipWallBCZeroNormalVelocity) {
                 break;
             }
         }
-        if (boundary_elem >= 0) break;
+        if (boundary_elem >= 0)
+            break;
     }
 
     ASSERT_GE(boundary_elem, 0);
@@ -284,7 +289,7 @@ TEST_F(EulerBoundaryConditionsTest, SlipWallBCZeroNormalVelocity) {
     double u_mag = 1.0;
     double u = tangent[0] * u_mag;
     double v = tangent[1] * u_mag;
-    
+
     // Verify velocity is actually tangential
     double normal_velocity = u * normal[0] + v * normal[1];
     EXPECT_NEAR(normal_velocity, 0.0, 1e-10);
@@ -296,7 +301,8 @@ TEST_F(EulerBoundaryConditionsTest, SlipWallBCZeroNormalVelocity) {
     Eigen::MatrixXd u_coeffs = make_constant_coeffs(n_basis, U);
 
     // Compute residual
-    Eigen::MatrixXd R_face = weak_form_->boundary_face_residual(u_coeffs, face_data, slip_bc, space);
+    Eigen::MatrixXd R_face =
+        weak_form_->boundary_face_residual(u_coeffs, face_data, slip_bc, space);
 
     // When velocity is tangential, the ghost state equals interior state
     // So we get the same flux as if both sides had identical states
@@ -304,14 +310,15 @@ TEST_F(EulerBoundaryConditionsTest, SlipWallBCZeroNormalVelocity) {
     EXPECT_EQ(R_face.rows(), n_basis);
     EXPECT_EQ(R_face.cols(), 4);
     EXPECT_GT(R_face.norm(), 1e-10);
-    
+
     // Compare with normal velocity case - should have less dissipation
     double u_norm = 0.3;
     double v_norm = 0.3;
     Eigen::Vector4d U_norm = make_uniform_conserved(rho, u_norm, v_norm, p, gamma_);
     Eigen::MatrixXd u_coeffs_norm = make_constant_coeffs(n_basis, U_norm);
-    Eigen::MatrixXd R_norm = weak_form_->boundary_face_residual(u_coeffs_norm, face_data, slip_bc, space);
-    
+    Eigen::MatrixXd R_norm =
+        weak_form_->boundary_face_residual(u_coeffs_norm, face_data, slip_bc, space);
+
     // Both should be finite and non-zero
     EXPECT_TRUE(R_norm.allFinite());
     EXPECT_GT(R_norm.norm(), 1e-10);
@@ -349,26 +356,23 @@ TEST_F(EulerBoundaryConditionsTest, NoSlipWallBCZeroVelocity) {
 
     // Verify evaluation returns primitive variables at multiple points
     std::vector<Eigen::Vector2d> test_points = {
-        Eigen::Vector2d(0.0, 0.0),
-        Eigen::Vector2d(0.5, 0.0),
-        Eigen::Vector2d(1.0, 0.5),
-        Eigen::Vector2d(0.25, 0.75)
-    };
-    
+        Eigen::Vector2d(0.0, 0.0), Eigen::Vector2d(0.5, 0.0), Eigen::Vector2d(1.0, 0.5),
+        Eigen::Vector2d(0.25, 0.75)};
+
     for (const auto& point : test_points) {
         Eigen::Vector4d evaluated = no_slip_bc->evaluate(point);
-        
+
         // The BC stores primitive variables, check them precisely
         EXPECT_DOUBLE_EQ(evaluated[0], rho_wall);  // rho - exact match
         EXPECT_DOUBLE_EQ(evaluated[1], 0.0);       // u = 0 - exact match
         EXPECT_DOUBLE_EQ(evaluated[2], 0.0);       // v = 0 - exact match
         EXPECT_DOUBLE_EQ(evaluated[3], p_wall);    // p - exact match
-        
+
         // Verify physical validity
         EXPECT_GT(evaluated[0], 0.0);  // Positive density
         EXPECT_GT(evaluated[3], 0.0);  // Positive pressure
     }
-    
+
     // Test with different wall conditions
     double rho_wall2 = 1.5;
     double p_wall2 = 2.0;
@@ -376,7 +380,7 @@ TEST_F(EulerBoundaryConditionsTest, NoSlipWallBCZeroVelocity) {
     primitive_bc2 << rho_wall2, 0.0, 0.0, p_wall2;
     auto no_slip_bc2 =
         std::make_shared<BoundaryConditionEuler>(BCTypeEuler::NO_SLIP_WALL, primitive_bc2);
-    
+
     Eigen::Vector4d eval2 = no_slip_bc2->evaluate(Eigen::Vector2d(0.5, 0.5));
     EXPECT_DOUBLE_EQ(eval2[0], rho_wall2);
     EXPECT_DOUBLE_EQ(eval2[1], 0.0);
@@ -409,7 +413,8 @@ TEST_F(EulerBoundaryConditionsTest, NoSlipWallBCResidual) {
                 break;
             }
         }
-        if (boundary_elem >= 0) break;
+        if (boundary_elem >= 0)
+            break;
     }
 
     ASSERT_GE(boundary_elem, 0);
@@ -429,36 +434,36 @@ TEST_F(EulerBoundaryConditionsTest, NoSlipWallBCResidual) {
     EXPECT_EQ(R_moving.rows(), n_basis);
     EXPECT_EQ(R_moving.cols(), 4);
     EXPECT_GT(R_moving.norm(), 1e-10);  // Non-zero residual
-    
+
     // Test 2: Interior flow at rest - should also have finite residual
     Eigen::Vector4d U_rest = make_uniform_conserved(rho_wall, 0.0, 0.0, p_wall, gamma_);
     Eigen::MatrixXd u_coeffs_rest = make_constant_coeffs(n_basis, U_rest);
     Eigen::MatrixXd R_rest =
         weak_form_->boundary_face_residual(u_coeffs_rest, face_data, no_slip_bc, space);
-    
+
     EXPECT_TRUE(R_rest.allFinite());
     EXPECT_GT(R_rest.norm(), 0.0);  // Still non-zero due to flux
-    
+
     // Test 3: Verify residual scales with velocity magnitude
     // Higher velocity should affect the momentum components more
     Eigen::Vector4d U_fast = make_uniform_conserved(rho_wall, 2.0, 1.0, p_wall, gamma_);
     Eigen::MatrixXd u_coeffs_fast = make_constant_coeffs(n_basis, U_fast);
     Eigen::MatrixXd R_fast =
         weak_form_->boundary_face_residual(u_coeffs_fast, face_data, no_slip_bc, space);
-    
+
     EXPECT_TRUE(R_fast.allFinite());
     EXPECT_GT(R_fast.norm(), 0.0);
-    
+
     // Test 4: Different pressure should affect residual
     double p_high = 2.0 * p_wall;
     Eigen::Vector4d U_high_p = make_uniform_conserved(rho_wall, u_int, v_int, p_high, gamma_);
     Eigen::MatrixXd u_coeffs_high_p = make_constant_coeffs(n_basis, U_high_p);
     Eigen::MatrixXd R_high_p =
         weak_form_->boundary_face_residual(u_coeffs_high_p, face_data, no_slip_bc, space);
-    
+
     EXPECT_TRUE(R_high_p.allFinite());
     EXPECT_GT(R_high_p.norm(), 0.0);
-    
+
     // All residuals should be of reasonable magnitude
     EXPECT_LT(R_moving.norm(), 100.0);
     EXPECT_LT(R_rest.norm(), 100.0);
@@ -489,33 +494,30 @@ TEST_F(EulerBoundaryConditionsTest, NoSlipWallBCSpatiallyVarying) {
 
     // Test evaluation at multiple points
     std::vector<Eigen::Vector2d> test_points = {
-        Eigen::Vector2d(0.0, 0.5),
-        Eigen::Vector2d(0.5, 0.5),
-        Eigen::Vector2d(1.0, 0.5)
-    };
-    
+        Eigen::Vector2d(0.0, 0.5), Eigen::Vector2d(0.5, 0.5), Eigen::Vector2d(1.0, 0.5)};
+
     std::vector<Eigen::Vector4d> evaluations;
     for (const auto& point : test_points) {
         Eigen::Vector4d prim = no_slip_bc->evaluate(point);
         evaluations.push_back(prim);
-        
+
         // Velocity must always be zero
         EXPECT_DOUBLE_EQ(prim[1], 0.0);
         EXPECT_DOUBLE_EQ(prim[2], 0.0);
-        
+
         // Physical validity
         EXPECT_GT(prim[0], 0.0);
         EXPECT_GT(prim[3], 0.0);
     }
-    
+
     // Verify spatial variation - pressure should increase with x
     EXPECT_LT(evaluations[0][3], evaluations[1][3]);
     EXPECT_LT(evaluations[1][3], evaluations[2][3]);
-    
+
     // Verify density also varies proportionally
     EXPECT_LT(evaluations[0][0], evaluations[1][0]);
     EXPECT_LT(evaluations[1][0], evaluations[2][0]);
-    
+
     // Check exact values at x=0 and x=1
     double tolerance = 1e-13;
     EXPECT_NEAR(evaluations[0][0], rho_base, tolerance);
@@ -571,8 +573,7 @@ TEST_F(EulerBoundaryConditionsTest, MixedBoundaryConditions) {
                     (bc->get_type() == BCTypeEuler::FAR_FIELD ||
                      bc->get_type() == BCTypeEuler::NO_SLIP_WALL ||
                      bc->get_type() == BCTypeEuler::SLIP_WALL ||
-                     bc->get_type() == BCTypeEuler::INLET ||
-                     bc->get_type() == BCTypeEuler::OUTLET);
+                     bc->get_type() == BCTypeEuler::INLET || bc->get_type() == BCTypeEuler::OUTLET);
                 EXPECT_TRUE(valid_type);
             }
         }
@@ -603,7 +604,8 @@ TEST_F(EulerBoundaryConditionsTest, PeriodicBCThrowsError) {
                 break;
             }
         }
-        if (boundary_elem >= 0) break;
+        if (boundary_elem >= 0)
+            break;
     }
 
     ASSERT_GE(boundary_elem, 0);
@@ -674,7 +676,8 @@ TEST_F(EulerBoundaryConditionsTest, SlipWallBCConservesMassAndEnergy) {
                 break;
             }
         }
-        if (boundary_elem >= 0) break;
+        if (boundary_elem >= 0)
+            break;
     }
 
     ASSERT_GE(boundary_elem, 0);

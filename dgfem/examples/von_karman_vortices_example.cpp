@@ -25,11 +25,11 @@ namespace {
 
 struct CylinderChannelConfig {
     double length = 1.0;               ///< Channel length
-    double height = 0.5;                ///< Channel height
+    double height = 0.5;               ///< Channel height
     double radius = 0.05;              ///< Cylinder radius
     Eigen::Vector2d center{0.2, 0.2};  ///< Cylinder center
     double dx_channel = 0.025;         ///< Characteristic mesh size away from the cylinder
-    double dx_cylinder = 0.0075;         ///< Refined size near the cylinder boundary
+    double dx_cylinder = 0.0075;       ///< Refined size near the cylinder boundary
 };
 
 struct UniformInflowProfile {
@@ -74,8 +74,8 @@ int main() {
         constexpr double gamma = 1.4;
         constexpr double density = 1.0;
         constexpr double pressure = 100.0;
-        constexpr double mu = 1.0e-5;       // Dynamic viscosity (Re ≈ 100 with chosen scales)
-        constexpr double prandtl = 0.72;    // Standard air value
+        constexpr double mu = 1.0e-5;      // Dynamic viscosity (Re ≈ 100 with chosen scales)
+        constexpr double prandtl = 0.72;   // Standard air value
         constexpr double penalty = 100.0;  // SIPG penalty prefactor for viscous terms
         const int poly_order = 1;
 
@@ -156,7 +156,8 @@ int main() {
 
         std::cout << "\n--- Exporting frames to VTK ---" << std::endl;
         for (size_t i = 0; i < solution_frames.size(); ++i) {
-            auto filename = (output_dir / ("von_karman_frame_1_poly_" + std::to_string(i))).string();
+            auto filename =
+                (output_dir / ("von_karman_frame_1_poly_" + std::to_string(i))).string();
             dgfem::VTKWriter::write_euler_solution(mesh, solution_frames[i], filename, gamma,
                                                    /*refinement=*/1);
             if (i % 5 == 0 || i == solution_frames.size() - 1) {
