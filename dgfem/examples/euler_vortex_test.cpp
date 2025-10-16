@@ -86,7 +86,7 @@ int main() {
         std::cout << "\n--- Exporting " << solutions.size() << " frames to VTK ---" << std::endl;
         for (size_t i = 0; i < solutions.size(); ++i) {
             dgfem::VTKWriter::write_euler_solution(
-                mesh, solutions[i], "../../output/euler_vortex_" + std::to_string(i), gamma, 2);
+                mesh, solutions[i], "output/euler_vortex_" + std::to_string(i), gamma, 2);
             if (i % 5 == 0 || i == solutions.size() - 1)
                 std::cout << "  Frame " << i << "/" << solutions.size() - 1 << std::endl;
         }

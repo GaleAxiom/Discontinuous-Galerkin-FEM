@@ -113,8 +113,11 @@ CompressibleDGSolverBase::time_step_ssp_rk3(const StateVector& u_n, double dt) c
 
 double CompressibleDGSolverBase::compute_max_cfl(const StateVector& u_coeffs, double dt) const {
     int n_elem = mesh_->get_n_elements();
-    int n_basis = mesh_->get_dg_space()->get_basis()->get_n_basis();
     double max_cfl = 0.0;
+
+    auto dg_space = mesh_->get_dg_space();
+    const Eigen::MatrixXd& phi = dg_space->get_volume_basis_values();
+    int n_quad = phi.rows();
 
     for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
         Eigen::MatrixXd vertices(mesh_->get_elements().cols(), 2);
@@ -131,17 +134,28 @@ double CompressibleDGSolverBase::compute_max_cfl(const StateVector& u_coeffs, do
         }
 
         double max_wave_speed = 0.0;
-        for (int i = 0; i < n_basis; ++i) {
-            double rho = u_coeffs[elem_id](i, 0);
-            double rho_u = u_coeffs[elem_id](i, 1);
-            double rho_v = u_coeffs[elem_id](i, 2);
-            double E = u_coeffs[elem_id](i, 3);
+        Eigen::MatrixXd U_quad = phi * u_coeffs[elem_id];
+
+        for (int q = 0; q < n_quad; ++q) {
+            double rho = U_quad(q, 0);
+            double rho_u = U_quad(q, 1);
+            double rho_v = U_quad(q, 2);
+            double E = U_quad(q, 3);
+
+            if (rho <= 0.0 || !std::isfinite(rho)) {
+                return std::numeric_limits<double>::infinity();
+            }
 
             double u = rho_u / rho;
             double v = rho_v / rho;
-            double p = (gamma_ - 1.0) * (E - 0.5 * rho * (u * u + v * v));
+            double kinetic = 0.5 * (u * u + v * v);
+            double p = (gamma_ - 1.0) * (E - rho * kinetic);
 
-            double c = std::sqrt(gamma_ * p / rho);
+            if (p <= 0.0 || !std::isfinite(p)) {
+                return std::numeric_limits<double>::infinity();
+            }
+
+            double c = std::sqrt(std::max(gamma_ * p / rho, 0.0));
             double vel_mag = std::sqrt(u * u + v * v);
             double wave_speed = vel_mag + c;
 
@@ -153,6 +167,35 @@ double CompressibleDGSolverBase::compute_max_cfl(const StateVector& u_coeffs, do
     }
 
     return max_cfl;
+}
+
+std::pair<double, double>
+CompressibleDGSolverBase::compute_density_range(const StateVector& u_coeffs) const {
+    auto dg_space = mesh_->get_dg_space();
+    const Eigen::MatrixXd& phi = dg_space->get_volume_basis_values();
+    int n_quad = phi.rows();
+
+    double rho_min = std::numeric_limits<double>::infinity();
+    double rho_max = std::numeric_limits<double>::lowest();
+
+    for (const auto& elem_coeffs : u_coeffs) {
+        Eigen::MatrixXd U_quad = phi * elem_coeffs;
+        for (int q = 0; q < n_quad; ++q) {
+            double rho = U_quad(q, 0);
+            if (!std::isfinite(rho)) {
+                continue;
+            }
+            rho_min = std::min(rho_min, rho);
+            rho_max = std::max(rho_max, rho);
+        }
+    }
+
+    if (!std::isfinite(rho_min) || !std::isfinite(rho_max)) {
+        double nan_value = std::numeric_limits<double>::quiet_NaN();
+        return {nan_value, nan_value};
+    }
+
+    return {rho_min, rho_max};
 }
 
 std::vector<Eigen::MatrixXd> CompressibleDGSolverBase::run_time_integration(
@@ -202,8 +245,10 @@ std::vector<Eigen::MatrixXd> CompressibleDGSolverBase::run_time_integration(
     double total_timestep_time = 0.0;
 
     {
+        auto [rho_min, rho_max] = compute_density_range(u_current);
         std::ostringstream msg;
-        msg << "Initial CFL number = " << std::fixed << std::setprecision(4) << max_cfl_encountered;
+        msg << "Initial CFL number = " << std::fixed << std::setprecision(4) << max_cfl_encountered
+            << ", rho in [" << rho_min << ", " << rho_max << "]";
         log(Stage::TimeStep, msg.str());
     }
     if (max_cfl_encountered > 1.0) {
@@ -216,14 +261,7 @@ std::vector<Eigen::MatrixXd> CompressibleDGSolverBase::run_time_integration(
         }
 
         if (step % 10 == 0) {
-            double rho_min = std::numeric_limits<double>::max();
-            double rho_max = std::numeric_limits<double>::lowest();
-
-            for (const auto& elem_coeffs : u_current) {
-                rho_min = std::min(rho_min, elem_coeffs.col(0).minCoeff());
-                rho_max = std::max(rho_max, elem_coeffs.col(0).maxCoeff());
-            }
-
+            auto [rho_min, rho_max] = compute_density_range(u_current);
             double current_cfl = compute_max_cfl(u_current, dt);
             max_cfl_encountered = std::max(max_cfl_encountered, current_cfl);
 
