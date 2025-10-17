@@ -35,6 +35,7 @@ CompressibleDGSolverBase::StateVector
 CompressibleDGSolverBase::assemble_residual(const StateVector& u_coeffs) const {
     increment_rhs_evaluations();
     assembler_->assemble_euler_residual(u_coeffs, residual_buffer_);
+
     return residual_buffer_;
 }
 
@@ -74,9 +75,9 @@ CompressibleDGSolverBase::StateVector CompressibleDGSolverBase::project_initial_
     for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
         const auto& elem_data = mesh_->get_element_data(elem_id);
 
-        Eigen::MatrixXd vertices(mesh_->get_elements().cols(), 2);
+        Eigen::MatrixXd vertices_local(mesh_->get_elements().cols(), 2);
         for (int i = 0; i < mesh_->get_elements().cols(); ++i) {
-            vertices.row(i) = mesh_->get_vertices().row(mesh_->get_elements()(elem_id, i));
+            vertices_local.row(i) = mesh_->get_vertices().row(mesh_->get_elements()(elem_id, i));
         }
 
         const Eigen::VectorXd& weights = dg_space->get_volume_quad()->weights;
@@ -88,7 +89,7 @@ CompressibleDGSolverBase::StateVector CompressibleDGSolverBase::project_initial_
 
         for (int q = 0; q < n_quad; ++q) {
             Eigen::Vector2d xi_q = dg_space->get_volume_quad()->points.row(q);
-            Eigen::Vector2d x_q = mapping->map_to_physical(vertices, xi_q);
+            Eigen::Vector2d x_q = mapping->map_to_physical(vertices_local, xi_q);
             Eigen::Vector4d U_q = u0_func(x_q);
             double w_q = weights[q] * std::abs(J_det[q]);
 
@@ -120,15 +121,15 @@ double CompressibleDGSolverBase::compute_max_cfl(const StateVector& u_coeffs, do
     int n_quad = phi.rows();
 
     for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
-        Eigen::MatrixXd vertices(mesh_->get_elements().cols(), 2);
+        Eigen::MatrixXd vertices_local(mesh_->get_elements().cols(), 2);
         for (int i = 0; i < mesh_->get_elements().cols(); ++i) {
-            vertices.row(i) = mesh_->get_vertices().row(mesh_->get_elements()(elem_id, i));
+            vertices_local.row(i) = mesh_->get_vertices().row(mesh_->get_elements()(elem_id, i));
         }
 
         double h_elem = std::numeric_limits<double>::max();
-        for (int i = 0; i < vertices.rows(); ++i) {
-            for (int j = i + 1; j < vertices.rows(); ++j) {
-                double dist = (vertices.row(i) - vertices.row(j)).norm();
+        for (int i = 0; i < vertices_local.rows(); ++i) {
+            for (int j = i + 1; j < vertices_local.rows(); ++j) {
+                double dist = (vertices_local.row(i) - vertices_local.row(j)).norm();
                 h_elem = std::min(h_elem, dist);
             }
         }
@@ -282,7 +283,6 @@ std::vector<Eigen::MatrixXd> CompressibleDGSolverBase::run_time_integration(
         u_current = time_step_ssp_rk3(u_current, dt);
         const auto step_end = std::chrono::high_resolution_clock::now();
         total_timestep_time += std::chrono::duration<double>(step_end - step_start).count();
-
         t += dt;
         step++;
         increment_steps();

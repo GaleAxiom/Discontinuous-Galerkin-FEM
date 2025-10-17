@@ -18,6 +18,13 @@ namespace dgfem {
 EulerWeakFormulation::EulerWeakFormulation(double gamma)
     : gamma_(gamma), gamma_minus_one_(gamma - 1.0) {}
 
+void EulerWeakFormulation::assemble(
+    DGAssembler& /*assembler*/, std::function<double(const Eigen::Vector2d&)> /*source_func*/,
+    std::function<double(const Eigen::Vector2d&)> /*bc_func*/) const {
+    throw std::runtime_error(
+        "Euler formulation uses residual assembly; call assemble via DGAssembler directly.");
+}
+
 // Helper struct to avoid redundant conversions
 struct FluxAndPrimitive {
     Eigen::Vector4d F, G, W;
@@ -226,16 +233,47 @@ Eigen::MatrixXd EulerWeakFormulation::boundary_face_residual(
             Eigen::Vector4d W_bc = bc->evaluate(x_q);
             U_R_q = primitive_to_conserved(W_bc, gamma_);
         } else if (bc->get_type() == BCTypeEuler::INLET) {
+            // Subsonic inlet: prescribe total conditions, extrapolate pressure
+            // For subsonic inflow: 2 characteristics enter, 2 leave
+            // We prescribe: density, velocity (or stagnation conditions)
+            // We extrapolate: pressure (from interior to avoid discontinuity)
+
             Eigen::Vector4d W_bc = bc->evaluate(x_q);
-            U_R_q = primitive_to_conserved(W_bc, gamma_);
+
+            // Compute normal velocity
+            double un_L = W_L_q[1] * normal[0] + W_L_q[2] * normal[1];
+
+            // Check if we have actual inflow
+            if (un_L < 0.0) {
+                // Actual inflow: prescribe density and velocity, extrapolate pressure
+                Eigen::Vector4d W_R_q;
+                W_R_q[0] = W_bc[0];   // Prescribed density
+                W_R_q[1] = W_bc[1];   // Prescribed u velocity
+                W_R_q[2] = W_bc[2];   // Prescribed v velocity
+                W_R_q[3] = W_L_q[3];  // Extrapolated pressure (avoids jump!)
+                U_R_q = primitive_to_conserved(W_R_q, gamma_);
+            } else {
+                // Outflow at inlet (shouldn't happen, but handle it)
+                // Use pure extrapolation
+                U_R_q = U_L_q;
+            }
         } else if (bc->get_type() == BCTypeEuler::OUTLET) {
-            Eigen::Vector4d W_bc = bc->evaluate(x_q);
-            Eigen::Vector4d W_R_q = W_L_q;
-            W_R_q[0] = W_bc[0];
-            W_R_q[1] = W_bc[1];
-            W_R_q[2] = W_bc[2];
-            W_R_q[3] = W_bc[3];
-            U_R_q = primitive_to_conserved(W_R_q, gamma_);
+            const Eigen::Vector4d U_bc = bc->evaluate(x_q);
+            const Eigen::Vector4d W_bc = conserved_to_primitive(U_bc, gamma_);
+
+            const double un_L = W_L_q[1] * normal[0] + W_L_q[2] * normal[1];
+
+            if (un_L >= 0.0) {
+                // Subsonic outflow: replace only the pressure characteristic and keep interior
+                // density/velocity to avoid reflections while enforcing target pressure.
+                Eigen::Vector4d W_R_q = W_L_q;
+                W_R_q[3] = W_bc[3];
+                U_R_q = primitive_to_conserved(W_R_q, gamma_);
+            } else {
+                // Incoming flow at the outlet: fall back to the prescribed exterior state so the
+                // boundary behaves like an inlet aligned with the far-field direction.
+                U_R_q = U_bc;
+            }
         } else if (bc->get_type() == BCTypeEuler::PERIODIC) {
             throw std::runtime_error("PERIODIC BC encountered in boundary_face_residual - periodic "
                                      "boundaries should be treated as interior faces");
@@ -260,52 +298,6 @@ Eigen::MatrixXd EulerWeakFormulation::boundary_face_residual(
     return R_face_bc;
 }
 
-void EulerWeakFormulation::assemble(DGAssembler& assembler,
-                                    std::function<double(const Eigen::Vector2d&)> source_func,
-                                    std::function<double(const Eigen::Vector2d&)> bc_func) const {
-    // Euler equations use residual-based assembly, not matrix assembly
-    // This method should not be called directly
-    throw std::runtime_error("Euler equations use assemble_euler_residual() instead of assemble()");
-}
-
-// Utility functions for Euler equations
-Eigen::Vector4d primitive_to_conserved(const Eigen::Vector4d& primitive, double gamma) {
-    const double rho = primitive[0];
-    const double u = primitive[1];
-    const double v = primitive[2];
-    const double p = primitive[3];
-
-    const double gamma_m1 = gamma - 1.0;
-    const double E = p / gamma_m1 + 0.5 * rho * (u * u + v * v);
-
-    Eigen::Vector4d conserved;
-    conserved[0] = rho;
-    conserved[1] = rho * u;
-    conserved[2] = rho * v;
-    conserved[3] = E;
-
-    return conserved;
-}
-
-Eigen::Vector4d conserved_to_primitive(const Eigen::Vector4d& conserved, double gamma) {
-    const double rho = conserved[0];
-    const double rho_inv = 1.0 / rho;  // Single division
-
-    const double u = conserved[1] * rho_inv;  // Multiply instead of divide
-    const double v = conserved[2] * rho_inv;  // Multiply instead of divide
-
-    const double gamma_m1 = gamma - 1.0;
-    const double p = gamma_m1 * (conserved[3] - 0.5 * rho * (u * u + v * v));
-
-    Eigen::Vector4d primitive;
-    primitive[0] = rho;
-    primitive[1] = u;
-    primitive[2] = v;
-    primitive[3] = p;
-
-    return primitive;
-}
-
 Eigen::MatrixXd EulerWeakFormulation::viscous_volume_residual(
     const Eigen::MatrixXd& u_coeffs_elem,
     const std::map<std::string, Eigen::MatrixXd>& /*elem_data*/,
@@ -328,6 +320,34 @@ Eigen::MatrixXd EulerWeakFormulation::viscous_boundary_face_residual(
     const std::map<std::string, Eigen::MatrixXd>& /*face_data*/,
     std::shared_ptr<BoundaryConditionEuler> /*bc*/, std::shared_ptr<DGSpace> dg_space) const {
     return Eigen::MatrixXd::Zero(dg_space->get_basis()->get_n_basis(), get_n_vars());
+}
+
+Eigen::Vector4d primitive_to_conserved(const Eigen::Vector4d& primitive, double gamma) {
+    const double rho = primitive[0];
+    const double u = primitive[1];
+    const double v = primitive[2];
+    const double p = primitive[3];
+
+    Eigen::Vector4d conserved;
+    conserved[0] = rho;
+    conserved[1] = rho * u;
+    conserved[2] = rho * v;
+    conserved[3] = p / (gamma - 1.0) + 0.5 * rho * (u * u + v * v);
+    return conserved;
+}
+
+Eigen::Vector4d conserved_to_primitive(const Eigen::Vector4d& conserved, double gamma) {
+    const double rho = conserved[0];
+    const double rho_u = conserved[1];
+    const double rho_v = conserved[2];
+    const double E = conserved[3];
+
+    Eigen::Vector4d primitive;
+    primitive[0] = rho;
+    primitive[1] = rho_u / rho;
+    primitive[2] = rho_v / rho;
+    primitive[3] = (gamma - 1.0) * (E - 0.5 * (rho_u * rho_u + rho_v * rho_v) / rho);
+    return primitive;
 }
 
 }  // namespace dgfem

@@ -24,6 +24,14 @@ target_link_libraries(euler_vortex_test dgfem)
 add_executable(taylor_green_test taylor_green_test.cpp)
 target_link_libraries(taylor_green_test dgfem)
 
+# Acoustic pulse example
+add_executable(acoustic_pulse acoustic_pulse.cpp)
+target_link_libraries(acoustic_pulse dgfem)
+
 # High-order elements test example
 add_executable(high_order_test high_order_test.cpp)
 target_link_libraries(high_order_test dgfem)
+
+# von Kármán vortex street test example
+add_executable(von_karman_test von_karman_test.cpp)
+target_link_libraries(von_karman_test dgfem)

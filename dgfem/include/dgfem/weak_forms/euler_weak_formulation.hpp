@@ -8,6 +8,12 @@
 #include "dgfem/boundary/conditions.hpp"
 #include "dgfem/weak_forms/weak_formulation_base.hpp"
 
+#include <Eigen/Dense>
+
+#include <functional>
+#include <map>
+#include <memory>
+
 namespace dgfem {
 
 /**
@@ -16,7 +22,7 @@ namespace dgfem {
 class EulerWeakFormulation : public TimeDependentWeakFormulation {
 public:
     explicit EulerWeakFormulation(double gamma = 1.4);
-    ~EulerWeakFormulation() override = default;
+    ~EulerWeakFormulation() = default;
 
     // Delete copy, default move
     EulerWeakFormulation(const EulerWeakFormulation&) = delete;
@@ -120,15 +126,11 @@ public:
         const Eigen::MatrixXd& u_coeffs, const std::map<std::string, Eigen::MatrixXd>& face_data,
         std::shared_ptr<BoundaryConditionEuler> bc, std::shared_ptr<DGSpace> dg_space) const;
 
-    [[nodiscard]] virtual double compute_penalty_parameter(int /*p*/, double /*h*/) const {
-        return 0.0;
-    }
+    double get_gamma() const { return gamma_; }
 
-    [[nodiscard]] double get_gamma() const noexcept { return gamma_; }
-
-protected:
-    double gamma_;            ///< Ratio of specific heats
-    double gamma_minus_one_;  ///< Cached gamma - 1.0 for performance
+private:
+    double gamma_;
+    double gamma_minus_one_;
 };
 
 // Utility functions for Euler equations

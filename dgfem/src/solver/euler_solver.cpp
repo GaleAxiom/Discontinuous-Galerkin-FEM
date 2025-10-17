@@ -1,12 +1,14 @@
 #include "dgfem/solver/dg_solver.hpp"
 #include "dgfem/weak_forms/euler_weak_formulation.hpp"
 
+#include <memory>
 #include <utility>
 
 namespace dgfem {
 
 EulerDGSolver::EulerDGSolver(std::shared_ptr<DGMesh> mesh, double gamma)
-    : EulerDGSolver(std::move(mesh), std::make_shared<EulerWeakFormulation>(gamma)) {}
+    : CompressibleDGSolverBase(std::move(mesh), std::make_shared<EulerWeakFormulation>(gamma),
+                               "Euler") {}
 
 EulerDGSolver::EulerDGSolver(std::shared_ptr<DGMesh> mesh,
                              std::shared_ptr<EulerWeakFormulation> weak_form)

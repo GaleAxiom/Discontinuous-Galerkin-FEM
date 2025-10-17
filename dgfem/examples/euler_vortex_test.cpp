@@ -57,7 +57,7 @@ int main() {
         const double beta = 5.0 / (2.0 * M_PI * std::sqrt(gamma)) * std::exp(0.5);
 
         // Create mesh using helper (triangles, order 3, spacing 0.1, 4 variables)
-        auto mesh = dgfem::MeshSetup::create_standard_mesh(true, 3, 0.1, 4, -5.0, 5.0, -5.0, 5.0);
+        auto mesh = dgfem::MeshSetup::create_standard_mesh(true, 6, 1, 4, -5.0, 5.0, -5.0, 5.0);
         dgfem::MeshSetup::print_info(mesh);
 
         // Set periodic boundaries for stationary vortex
