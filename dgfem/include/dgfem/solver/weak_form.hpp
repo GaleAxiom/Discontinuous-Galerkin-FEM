@@ -12,5 +12,4 @@
 #include "dgfem/weak_forms/advection_weak_formulation.hpp"
 #include "dgfem/weak_forms/euler_weak_formulation.hpp"
 #include "dgfem/weak_forms/laplace_weak_formulation.hpp"
-#include "dgfem/weak_forms/navier_stokes_weak_formulation.hpp"
 #include "dgfem/weak_forms/weak_formulation_base.hpp"

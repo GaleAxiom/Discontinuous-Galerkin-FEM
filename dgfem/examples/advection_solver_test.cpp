@@ -39,7 +39,7 @@ int main() {
         // Time stepping
         constexpr double T_final = 2.0;
         constexpr double dt = 0.001;
-        constexpr int save_every = 20;
+        constexpr int save_every = 100;
 
         std::cout << "\n--- Solving ---" << std::endl;
         std::cout << "  T_final = " << T_final << ", dt = " << dt
@@ -52,8 +52,8 @@ int main() {
         // Export and validate
         std::cout << "\n--- Exporting " << solutions.size() << " frames ---" << std::endl;
         for (size_t i = 0; i < solutions.size(); ++i) {
-            dgfem::VTKWriter::write_solution(
-                mesh, solutions[i], "../../output/advection_solution_" + std::to_string(i));
+            dgfem::VTKWriter::write_solution(mesh, solutions[i],
+                                             "output/advection_solution_" + std::to_string(i));
             if (i % 5 == 0 || i == solutions.size() - 1)
                 std::cout << "  Frame " << i << std::endl;
         }
