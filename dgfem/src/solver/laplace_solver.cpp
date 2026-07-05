@@ -1,6 +1,6 @@
 #include "dgfem/solver/dg_solver.hpp"
 
-#include <Eigen/SparseLU>
+#include <Amesos2.hpp>
 #include <cmath>
 
 #include <sstream>
@@ -26,44 +26,47 @@ Eigen::VectorXd LaplaceDGSolver::solve(std::function<double(const Eigen::Vector2
     end_stage(Stage::Assembly);
     log(Stage::Assembly, "Assembled Laplace system.");
 
-    const auto& system_matrix = assembler_->get_system_matrix();
-    const auto& rhs = assembler_->get_rhs();
+    auto system_matrix = assembler_->get_system_matrix();
+    auto rhs = assembler_->get_rhs();
 
-    if (system_matrix.rows() == 0) {
+    if (system_matrix->getGlobalNumRows() == 0) {
         throw std::runtime_error("System matrix is empty");
     }
 
     begin_stage(Stage::Solve);
-    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
-    solver.compute(system_matrix);
+    auto x = Teuchos::rcp(new TpetraMultiVector(rhs->getMap(), 1));
+    x->putScalar(0.0);
 
-    if (solver.info() != Eigen::Success) {
-        throw std::runtime_error("Matrix factorization failed");
-    }
+    // const_cast: Amesos2::create wants a non-const RCP<const CrsMatrix> is fine, but the
+    // solver interface requires a non-const RHS/solution RCP pair with matching constness.
+    auto solver = Amesos2::create<TpetraCrsMatrix, TpetraMultiVector>(
+        "klu2", system_matrix, x, Teuchos::rcp_const_cast<TpetraMultiVector>(rhs));
 
-    Eigen::VectorXd solution = solver.solve(rhs);
-
-    if (solver.info() != Eigen::Success) {
-        throw std::runtime_error("Linear solve failed");
+    try {
+        solver->symbolicFactorization().numericFactorization().solve();
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("Laplace linear solve failed: ") + e.what());
     }
 
     end_stage(Stage::Solve);
+
+    Eigen::VectorXd solution = tpetra_to_eigen(*x);
 
     std::ostringstream oss;
     oss << "Solver converged. Solution norm = " << solution.norm();
     log(Stage::Solve, oss.str());
 
-    assembler_->distribute_solution(solution);
+    assembler_->distribute_solution(*x);
     increment_output_frames();
 
     return solution;
 }
 
-const Eigen::SparseMatrix<double>& LaplaceDGSolver::get_system_matrix() const {
+Teuchos::RCP<const TpetraCrsMatrix> LaplaceDGSolver::get_system_matrix() const {
     return assembler_->get_system_matrix();
 }
 
-const Eigen::VectorXd& LaplaceDGSolver::get_rhs() const noexcept {
+Teuchos::RCP<const TpetraMultiVector> LaplaceDGSolver::get_rhs() const noexcept {
     return assembler_->get_rhs();
 }
 

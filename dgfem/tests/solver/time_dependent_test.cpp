@@ -65,7 +65,7 @@ TEST_F(TimeDependentSolverTest, AdvectionTimeSteppingStability) {
     auto weak_form = std::make_shared<AdvectionWeakFormulation>(velocity);
     auto assembler = std::make_shared<DGAssembler>(mesh, weak_form);
 
-    Eigen::SparseMatrix<double> M = assembler->assemble_mass_matrix();
+    auto M = assembler->assemble_mass_matrix();
     // Would need advection operator assembly here
 
     // For now, just test that solution remains bounded
@@ -249,7 +249,7 @@ TEST_F(TimeDependentSolverTest, MassConservation) {
     // Assemble mass matrix
     auto weak_form = std::make_shared<AdvectionWeakFormulation>(velocity);
     auto assembler = std::make_shared<DGAssembler>(mesh, weak_form);
-    Eigen::SparseMatrix<double> M = assembler->assemble_mass_matrix();
+    Eigen::MatrixXd M = tpetra_to_dense(*assembler->assemble_mass_matrix());
 
     // Compute total mass: ∫u dx ≈ 1^T M u
     Eigen::VectorXd ones = Eigen::VectorXd::Ones(n_dofs);

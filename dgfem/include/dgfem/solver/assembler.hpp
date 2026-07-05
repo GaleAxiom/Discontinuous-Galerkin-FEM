@@ -15,6 +15,7 @@
 #include <memory>
 #include <vector>
 
+#include "trilinos_types.hpp"
 #include "weak_form.hpp"
 
 namespace dgfem {
@@ -48,7 +49,7 @@ public:
     /**
      * @brief Assemble mass matrix for time-dependent problems
      */
-    [[nodiscard]] Eigen::SparseMatrix<double> assemble_mass_matrix();
+    [[nodiscard]] Teuchos::RCP<TpetraCrsMatrix> assemble_mass_matrix();
 
     /**
      * @brief Assemble Euler residual for time stepping (used for Euler equations)
@@ -66,19 +67,19 @@ public:
     /**
      * @brief Get system matrix
      */
-    [[nodiscard]] const Eigen::SparseMatrix<double>& get_system_matrix() const noexcept {
+    [[nodiscard]] Teuchos::RCP<const TpetraCrsMatrix> get_system_matrix() const noexcept {
         return system_matrix_;
     }
 
     /**
      * @brief Get RHS vector
      */
-    [[nodiscard]] const Eigen::VectorXd& get_rhs() const noexcept { return rhs_; }
+    [[nodiscard]] Teuchos::RCP<const TpetraMultiVector> get_rhs() const noexcept { return rhs_; }
 
     /**
      * @brief Distribute solution vector back to mesh
      */
-    void distribute_solution(const Eigen::VectorXd& solution);
+    void distribute_solution(const TpetraMultiVector& solution);
 
     // Assembly utilities for weak formulations
     /**
@@ -151,8 +152,9 @@ private:
 
     // System data
     int n_dofs_;
-    Eigen::SparseMatrix<double> system_matrix_;
-    Eigen::VectorXd rhs_;
+    Teuchos::RCP<const TpetraMap> map_;
+    Teuchos::RCP<TpetraCrsMatrix> system_matrix_;
+    Teuchos::RCP<TpetraMultiVector> rhs_;
 
     // Assembly helpers
     std::vector<Eigen::Triplet<double>> triplets_;
@@ -183,7 +185,13 @@ DGAssembler::DGAssembler(std::shared_ptr<DGMesh> mesh, std::shared_ptr<WeakFormT
     set_weak_form(weak_form);
     n_dofs_ =
         mesh->get_n_elements() * dg_space_->get_basis()->get_n_basis() * weak_form->get_n_vars();
-    rhs_.resize(n_dofs_);
+    map_ = make_serial_map(n_dofs_);
+    rhs_ = Teuchos::rcp(new TpetraMultiVector(map_, 1));
+    // Solvers that never call finalize_assembly() (the matrix-free compressible/Euler/NS path)
+    // still need get_system_matrix() to return a safely-queryable (if empty) matrix, matching
+    // the old Eigen::SparseMatrix default-constructed-empty behavior rather than a null RCP.
+    system_matrix_ = Teuchos::rcp(new TpetraCrsMatrix(map_, size_t(0)));
+    system_matrix_->fillComplete();
 }
 
 }  // namespace dgfem

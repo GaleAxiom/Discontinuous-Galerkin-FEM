@@ -78,7 +78,7 @@ TEST(LaplaceWeakFormulationTest, InteriorFaceIntegral) {
         -0.5, -0.25, -0.25, 20.5, 6.16667, 13.8333;
 
     // Convert sparse matrix to dense for comparison
-    Eigen::MatrixXd computed = Eigen::MatrixXd(system_matrix);
+    Eigen::MatrixXd computed = tpetra_to_dense(*system_matrix);
 
     // Compare matrices
     double tolerance = 1e-3;  // Adjust tolerance as needed
@@ -282,7 +282,7 @@ TEST(AdvectionWeakFormulationTest, MassMatrixAssembly) {
     auto M = assembler->assemble_mass_matrix();
 
     // Mass matrix should be symmetric and positive definite
-    Eigen::MatrixXd M_dense = Eigen::MatrixXd(M);
+    Eigen::MatrixXd M_dense = tpetra_to_dense(*M);
 
     // Check symmetry
     for (int i = 0; i < M_dense.rows(); ++i) {
@@ -316,11 +316,11 @@ TEST(AdvectionWeakFormulationTest, AdvectionOperatorAssembly) {
     auto F = assembler->get_rhs();
 
     // Operator should have correct size
-    EXPECT_EQ(L.rows(), L.cols());
-    EXPECT_EQ(F.size(), L.rows());
+    EXPECT_EQ(L->getGlobalNumRows(), L->getGlobalNumCols());
+    EXPECT_EQ(F->getGlobalLength(), L->getGlobalNumRows());
 
     // L should be non-zero (contains stiffness and face terms)
-    EXPECT_GT(L.nonZeros(), 0);
+    EXPECT_GT(L->getGlobalNumEntries(), 0u);
 }
 
 TEST(AdvectionWeakFormulationTest, ZeroVelocityProperty) {
@@ -343,8 +343,8 @@ TEST(AdvectionWeakFormulationTest, ZeroVelocityProperty) {
 
     // For zero velocity, L should be essentially zero (only numerical errors)
     // and F should also be zero (no boundary forcing with zero BC)
-    EXPECT_LT(L.norm(), 1e-10);
-    EXPECT_LT(F.norm(), 1e-10);
+    EXPECT_LT(tpetra_to_dense(*L).norm(), 1e-10);
+    EXPECT_LT(tpetra_to_eigen(*F).norm(), 1e-10);
 }
 
 // TEST(EulerWeakFormulationTest, Construction) {

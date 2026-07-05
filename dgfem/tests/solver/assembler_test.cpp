@@ -95,16 +95,16 @@ TEST(DGAssemblerTest, AssembleLaplaceSystem) {
 
     assembler.assemble([](const Eigen::Vector2d&) { return 1.0; });
 
-    const auto& matrix = assembler.get_system_matrix();
-    const auto& rhs = assembler.get_rhs();
+    auto matrix = assembler.get_system_matrix();
+    auto rhs = assembler.get_rhs();
 
     auto n_dofs = mesh->get_n_elements() * mesh->get_dg_space()->get_basis()->get_n_basis();
     // Check matrix and vector properties
-    EXPECT_EQ(matrix.rows(), n_dofs);
-    EXPECT_EQ(matrix.cols(), n_dofs);
-    EXPECT_EQ(rhs.size(), n_dofs);
-    EXPECT_GT(matrix.nonZeros(), 0);
-    EXPECT_GT(rhs.norm(), 0);
+    EXPECT_EQ(static_cast<int>(matrix->getGlobalNumRows()), n_dofs);
+    EXPECT_EQ(static_cast<int>(matrix->getGlobalNumCols()), n_dofs);
+    EXPECT_EQ(static_cast<int>(rhs->getGlobalLength()), n_dofs);
+    EXPECT_GT(matrix->getGlobalNumEntries(), 0u);
+    EXPECT_GT(tpetra_to_eigen(*rhs).norm(), 0);
 }
 
 TEST(DGAssemblerTest, DistributeSolution) {
@@ -118,8 +118,9 @@ TEST(DGAssemblerTest, DistributeSolution) {
 
     // Create a test solution vector
     Eigen::VectorXd solution_vec = Eigen::VectorXd::LinSpaced(n_dofs, 0, 1);
+    auto solution_tpetra = eigen_to_tpetra(solution_vec, make_serial_map(n_dofs));
 
-    EXPECT_NO_THROW(assembler.distribute_solution(solution_vec));
+    EXPECT_NO_THROW(assembler.distribute_solution(*solution_tpetra));
 
     // Verify solution is correctly distributed
     auto mesh_solution = mesh->get_solution();

@@ -11,6 +11,7 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <map>
 
 namespace dgfem {
 
@@ -31,7 +32,7 @@ void DGAssembler::assemble(std::function<double(const Eigen::Vector2d&)> source_
     weak_form_->assemble(*this, source_func, bc_func);
 }
 
-Eigen::SparseMatrix<double> DGAssembler::assemble_mass_matrix() {
+Teuchos::RCP<TpetraCrsMatrix> DGAssembler::assemble_mass_matrix() {
     // Use polymorphism to work with any time-dependent weak formulation
     // This replaces the old approach of checking for specific formulation types
     if (!weak_form_) {
@@ -49,7 +50,8 @@ Eigen::SparseMatrix<double> DGAssembler::assemble_mass_matrix() {
     }
 
     int n_basis = dg_space_->get_basis()->get_n_basis();
-    std::vector<Eigen::Triplet<double>> mass_triplets;
+    // Block-diagonal (mass integrals never couple different elements): n_basis nonzeros/row.
+    auto mass_matrix = Teuchos::rcp(new TpetraCrsMatrix(map_, n_basis));
 
     for (int elem_id = 0; elem_id < mesh_->get_n_elements(); ++elem_id) {
         auto dof_indices = get_dof_indices(elem_id, 0);
@@ -58,33 +60,36 @@ Eigen::SparseMatrix<double> DGAssembler::assemble_mass_matrix() {
         Eigen::MatrixXd M_local = time_dep_weak_form->compute_mass_integral(elem_data, dg_space_);
 
         for (int i = 0; i < n_basis; ++i) {
+            std::vector<TpetraGlobalOrdinal> cols;
+            std::vector<TpetraScalar> vals;
             for (int j = 0; j < n_basis; ++j) {
                 if (std::abs(M_local(i, j)) > 1e-14) {
-                    mass_triplets.emplace_back(dof_indices[i], dof_indices[j], M_local(i, j));
+                    cols.push_back(dof_indices[j]);
+                    vals.push_back(M_local(i, j));
                 }
             }
+            mass_matrix->insertGlobalValues(dof_indices[i], cols, vals);
         }
     }
-
-    Eigen::SparseMatrix<double> mass_matrix(n_dofs_, n_dofs_);
-    mass_matrix.setFromTriplets(mass_triplets.begin(), mass_triplets.end());
+    mass_matrix->fillComplete();
     return mass_matrix;
 }
 
-void DGAssembler::distribute_solution(const Eigen::VectorXd& solution) {
-    if (solution.size() != n_dofs_) {
+void DGAssembler::distribute_solution(const TpetraMultiVector& solution) {
+    if (static_cast<int>(solution.getGlobalLength()) != n_dofs_) {
         throw std::invalid_argument("Solution vector size mismatch");
     }
 
     auto mesh_solution = mesh_->get_solution();
     int n_basis = dg_space_->get_basis()->get_n_basis();
+    auto view = solution.getLocalViewHost(Tpetra::Access::ReadOnly);
 
     for (int elem_id = 0; elem_id < mesh_->get_n_elements(); ++elem_id) {
         auto dof_indices = get_dof_indices(elem_id, 0);
         Eigen::VectorXd elem_coeffs(n_basis);
 
         for (int i = 0; i < n_basis; ++i) {
-            elem_coeffs[i] = solution[dof_indices[i]];
+            elem_coeffs[i] = view(dof_indices[i], 0);
         }
 
         mesh_solution->set_element_coeffs(elem_id, 0, elem_coeffs);
@@ -117,21 +122,44 @@ void DGAssembler::add_to_matrix(int elem_i, int elem_j, const Eigen::MatrixXd& K
 
 void DGAssembler::add_to_rhs(int elem_id, const Eigen::VectorXd& F_local) {
     auto dof_indices = get_dof_indices(elem_id, 0);
+    auto view = rhs_->getLocalViewHost(Tpetra::Access::ReadWrite);
 
     for (int i = 0; i < static_cast<int>(dof_indices.size()); ++i) {
-        rhs_[dof_indices[i]] += F_local[i];
+        view(dof_indices[i], 0) += F_local[i];
     }
 }
 
 void DGAssembler::clear_assembly_data() {
     triplets_.clear();
-    rhs_.setZero();
+    rhs_->putScalar(0.0);
 }
 
 void DGAssembler::finalize_assembly() {
-    system_matrix_.resize(n_dofs_, n_dofs_);
-    system_matrix_.setFromTriplets(triplets_.begin(), triplets_.end());
-    system_matrix_.makeCompressed();
+    // Group triplets by row so each row's nonzero columns can be inserted together (Tpetra
+    // has no direct (row, col, value) triplet-list constructor like Eigen::setFromTriplets).
+    std::map<TpetraGlobalOrdinal, std::map<TpetraGlobalOrdinal, double>> rows;
+    for (const auto& t : triplets_) {
+        rows[t.row()][t.col()] += t.value();
+    }
+
+    std::vector<size_t> num_entries_per_row(n_dofs_, 0);
+    for (const auto& [row, cols] : rows) {
+        num_entries_per_row[row] = cols.size();
+    }
+    system_matrix_ = Teuchos::rcp(
+        new TpetraCrsMatrix(map_, Teuchos::ArrayView<const size_t>(num_entries_per_row)));
+    for (const auto& [row, cols] : rows) {
+        std::vector<TpetraGlobalOrdinal> col_ids;
+        std::vector<TpetraScalar> values;
+        col_ids.reserve(cols.size());
+        values.reserve(cols.size());
+        for (const auto& [col, value] : cols) {
+            col_ids.push_back(col);
+            values.push_back(value);
+        }
+        system_matrix_->insertGlobalValues(row, col_ids, values);
+    }
+    system_matrix_->fillComplete();
 }
 
 void DGAssembler::assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_coeffs,

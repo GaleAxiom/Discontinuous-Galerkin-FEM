@@ -23,7 +23,7 @@ AdvectionDGSolver::AdvectionDGSolver(std::shared_ptr<DGMesh> mesh,
     log(Stage::Setup, oss.str());
 }
 
-const Eigen::SparseMatrix<double>& AdvectionDGSolver::get_system_matrix() const {
+Teuchos::RCP<const TpetraCrsMatrix> AdvectionDGSolver::get_system_matrix() const {
     return assembler_->get_system_matrix();
 }
 
@@ -100,18 +100,27 @@ AdvectionDGSolver::solve(std::function<double(const Eigen::Vector2d&)> initial_c
 }
 
 void AdvectionDGSolver::compute_mass_matrix_inverse_blocks() {
-    Eigen::SparseMatrix<double> M = assembler_->assemble_mass_matrix();
+    auto M = assembler_->assemble_mass_matrix();
 
     int n_basis = mesh_->get_dg_space()->get_basis()->get_n_basis();
     M_inv_blocks_.clear();
     M_inv_blocks_.reserve(mesh_->get_n_elements());
 
+    // Mass integrals never couple different elements, so each element's block is exactly the
+    // rows [start, start+n_basis) of the (block-diagonal) global mass matrix, restricted to
+    // those same columns.
     for (int elem_id = 0; elem_id < mesh_->get_n_elements(); ++elem_id) {
         int start = elem_id * n_basis;
-        Eigen::MatrixXd M_block(n_basis, n_basis);
+        Eigen::MatrixXd M_block = Eigen::MatrixXd::Zero(n_basis, n_basis);
         for (int i = 0; i < n_basis; ++i) {
-            for (int j = 0; j < n_basis; ++j) {
-                M_block(i, j) = M.coeff(start + i, start + j);
+            typename TpetraCrsMatrix::local_inds_host_view_type indices;
+            typename TpetraCrsMatrix::values_host_view_type values;
+            M->getLocalRowView(start + i, indices, values);
+            for (size_t k = 0; k < indices.extent(0); ++k) {
+                int col = static_cast<int>(indices(k)) - start;
+                if (col >= 0 && col < n_basis) {
+                    M_block(i, col) = values(k);
+                }
             }
         }
         M_inv_blocks_.push_back(M_block.inverse());
@@ -176,8 +185,13 @@ Eigen::VectorXd AdvectionDGSolver::time_step_ssp_rk3(const Eigen::VectorXd& u_n,
 
 Eigen::VectorXd AdvectionDGSolver::compute_rhs(const Eigen::VectorXd& u) const {
     increment_rhs_evaluations();
-    Eigen::VectorXd rhs = L_operator_ * u + F_boundary_;
-    return apply_mass_inv(rhs);
+
+    auto u_tpetra = eigen_to_tpetra(u, L_operator_->getDomainMap());
+    TpetraMultiVector Lu(L_operator_->getRangeMap(), 1);
+    L_operator_->apply(*u_tpetra, Lu);
+    Lu.update(1.0, *F_boundary_, 1.0);  // Lu += F_boundary_
+
+    return apply_mass_inv(tpetra_to_eigen(Lu));
 }
 
 }  // namespace dgfem

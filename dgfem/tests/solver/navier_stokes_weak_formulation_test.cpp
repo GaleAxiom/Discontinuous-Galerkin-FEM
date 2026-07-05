@@ -541,8 +541,8 @@ TEST(NavierStokesWeakFormulationTest, NavierStokesSolverConstructs) {
     mesh->initialize_dg_space(space, 4);
 
     NavierStokesDGSolver solver(mesh, 1.4, 1.0e-3, 0.72, 5.0);
-    const auto& system_matrix = solver.get_system_matrix();
-    EXPECT_EQ(system_matrix.rows(), system_matrix.cols());
+    auto system_matrix = solver.get_system_matrix();
+    EXPECT_EQ(system_matrix->getGlobalNumRows(), system_matrix->getGlobalNumCols());
 }
 
 TEST(NavierStokesWeakFormulationTest, EulerVolumeResidualPerformance) {

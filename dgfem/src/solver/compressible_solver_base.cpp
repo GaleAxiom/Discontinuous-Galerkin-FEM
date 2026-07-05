@@ -27,7 +27,7 @@ CompressibleDGSolverBase::CompressibleDGSolverBase(std::shared_ptr<DGMesh> mesh,
     log(Stage::Setup, oss.str());
 }
 
-const Eigen::SparseMatrix<double>& CompressibleDGSolverBase::get_system_matrix() const {
+Teuchos::RCP<const TpetraCrsMatrix> CompressibleDGSolverBase::get_system_matrix() const {
     return assembler_->get_system_matrix();
 }
 

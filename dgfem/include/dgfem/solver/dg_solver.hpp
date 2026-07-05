@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "assembler.hpp"
+#include "trilinos_types.hpp"
 // #include "time_stepping.hpp"
 #include "weak_form.hpp"
 
@@ -84,7 +85,7 @@ public:
     [[nodiscard]] std::shared_ptr<DGSpace> space() const;
     [[nodiscard]] int total_dofs() const;
 
-    [[nodiscard]] virtual const Eigen::SparseMatrix<double>& get_system_matrix() const = 0;
+    [[nodiscard]] virtual Teuchos::RCP<const TpetraCrsMatrix> get_system_matrix() const = 0;
 
 protected:
     void begin_stage(Stage stage) const;
@@ -140,12 +141,12 @@ public:
     [[nodiscard]] Eigen::VectorXd
     solve(std::function<double(const Eigen::Vector2d&)> source_func = nullptr);
 
-    [[nodiscard]] const Eigen::SparseMatrix<double>& get_system_matrix() const override;
+    [[nodiscard]] Teuchos::RCP<const TpetraCrsMatrix> get_system_matrix() const override;
 
     /**
      * @brief Get assembled RHS vector
      */
-    [[nodiscard]] const Eigen::VectorXd& get_rhs() const noexcept;
+    [[nodiscard]] Teuchos::RCP<const TpetraMultiVector> get_rhs() const noexcept;
 
     /**
      * @brief Compute L2 and H1 errors against exact solution
@@ -179,16 +180,16 @@ public:
           double dt, std::shared_ptr<BoundaryCondition> boundary_condition = nullptr,
           int save_every = 1);
 
-    [[nodiscard]] const Eigen::SparseMatrix<double>& get_system_matrix() const override;
+    [[nodiscard]] Teuchos::RCP<const TpetraCrsMatrix> get_system_matrix() const override;
 
 private:
     std::shared_ptr<AdvectionWeakFormulation> weak_form_;
     Eigen::Vector2d advection_velocity_;
 
     // Precomputed operators for time stepping
-    Eigen::SparseMatrix<double> L_operator_;     // Spatial operator
-    Eigen::VectorXd F_boundary_;                 // Boundary forcing
-    std::vector<Eigen::MatrixXd> M_inv_blocks_;  // Mass matrix inverse blocks per element
+    Teuchos::RCP<const TpetraCrsMatrix> L_operator_;    // Spatial operator
+    Teuchos::RCP<const TpetraMultiVector> F_boundary_;  // Boundary forcing
+    std::vector<Eigen::MatrixXd> M_inv_blocks_;         // Mass matrix inverse blocks per element
 
     /**
      * @brief Precompute mass matrix inverse blocks
@@ -224,7 +225,7 @@ class CompressibleDGSolverBase : public DGSolverBase {
 public:
     using StateVector = std::vector<Eigen::MatrixXd>;
 
-    [[nodiscard]] const Eigen::SparseMatrix<double>& get_system_matrix() const override;
+    [[nodiscard]] Teuchos::RCP<const TpetraCrsMatrix> get_system_matrix() const override;
 
 protected:
     CompressibleDGSolverBase(std::shared_ptr<DGMesh> mesh,

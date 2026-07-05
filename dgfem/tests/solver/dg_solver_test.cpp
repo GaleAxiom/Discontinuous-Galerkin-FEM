@@ -182,8 +182,8 @@ TEST_F(LaplaceDGSolverTest, SystemMatrixTest) {
 
     solver->solve(nullptr);
 
-    const auto& system_matrix_sparse = solver->get_system_matrix();
-    Eigen::MatrixXd system_matrix_dense = system_matrix_sparse;
+    auto system_matrix_sparse = solver->get_system_matrix();
+    Eigen::MatrixXd system_matrix_dense = tpetra_to_dense(*system_matrix_sparse);
 
     Eigen::MatrixXd expected_matrix(12, 12);
     expected_matrix << 120., 41., 39.5, -40., -19.5, -20., -40., -19.5, -0.5, 0., 0., 0., 41.,
@@ -249,19 +249,18 @@ TEST_F(AdvectionDGSolverTest, MassMatrixAssembly) {
     auto weak_form = std::make_shared<AdvectionWeakFormulation>(velocity);
     auto assembler = std::make_shared<DGAssembler>(mesh, weak_form);
 
-    Eigen::SparseMatrix<double> M = assembler->assemble_mass_matrix();
+    Eigen::MatrixXd M = tpetra_to_dense(*assembler->assemble_mass_matrix());
 
     int n_dofs = mesh->get_n_elements() * space->get_basis()->get_n_basis();
     EXPECT_EQ(M.rows(), n_dofs);
     EXPECT_EQ(M.cols(), n_dofs);
 
     // Mass matrix should be symmetric
-    Eigen::SparseMatrix<double> M_transpose = M.transpose();
-    EXPECT_NEAR((M - M_transpose).norm(), 0.0, 1e-10);
+    EXPECT_NEAR((M - M.transpose()).norm(), 0.0, 1e-10);
 
     // Mass matrix should be positive definite (diagonal dominant)
     for (int i = 0; i < M.rows(); ++i) {
-        EXPECT_GT(M.coeff(i, i), 0.0);
+        EXPECT_GT(M(i, i), 0.0);
     }
 }
 
