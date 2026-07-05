@@ -486,7 +486,7 @@ void QuadratureFactory::get_dunavant_rule(int order, DView2& points, DView1& wei
         weights[5] = 5.16086852673590e-2;
         weights[6] = 5.16086852673590e-2;
         weights[7] = 1.62292488115990e-2;
-        weights[8] = 1.62292488115988e-2;
+        weights[8] = 1.62292488115990e-2;
         weights[9] = 1.62292488115990e-2;
         weights[10] = 1.36151570872175e-2;
         weights[11] = 1.36151570872175e-2;

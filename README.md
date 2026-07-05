@@ -1,11 +1,8 @@
 # Discontinuous Galerkin Finite Element Method (DG-FEM)
 
 [![CMake Build](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/cmake-single-platform.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/cmake-single-platform.yml)
-[![Matrix Build](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/matrix-build.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/matrix-build.yml)
 [![Code Coverage](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/code-coverage.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/code-coverage.yml)
-[![Static Analysis](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/static-analysis.yml)
-[![Docker](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/docker-publish.yml)
-[![Security Scan](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/dependency-scan.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/dependency-scan.yml)
+[![Format Check](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/format-check.yml/badge.svg)](https://github.com/GaleAxiom/Discontinuous-Galerkin-FEM/actions/workflows/format-check.yml)
 
 A high-performance C++20 implementation of the Discontinuous Galerkin Finite Element Method for solving partial differential equations (PDEs).
 
@@ -86,12 +83,14 @@ The `dgfem/examples/` directory contains several demonstration programs:
 - **`advection_solver_test.cpp`** - Scalar advection with DG
 
 ### Advanced Examples
-- **`euler_vortex_test.cpp`** - Isentropic vortex (Euler equations)
-- **`taylor_green_test.cpp`** - Taylor-Green vortex flow
-- **`shear_flow_example.cpp`** - Shear layer instability
-- **`acoustic_wave_test.cpp`** - Acoustic wave propagation
+
 - **`convergence_test.cpp`** - Convergence rate verification
 - **`high_order_test.cpp`** - High-order (p > 3) accuracy demonstration
+
+`dgfem/examples/archive/` also contains Euler/Navier-Stokes examples (isentropic vortex,
+Taylor-Green vortex, shear layer, acoustic wave, von Karman vortex street) from earlier in the
+Eigen-to-Trilinos migration. They aren't currently wired into `dgfem/examples/CMakeLists.txt`
+and don't build -- treat them as reference code to port forward, not runnable examples.
 
 ### Running Examples
 
@@ -101,8 +100,8 @@ cd build/examples
 # Run Laplace solver
 ./laplace_solver_test
 
-# Run Euler vortex test
-./euler_vortex_test
+# Run the convergence-rate study
+./convergence_test
 
 # Visualize results in ParaView
 paraview ../output/*.vtk

@@ -155,7 +155,12 @@ private:
     Teuchos::RCP<TpetraCrsMatrix> system_matrix_;
     Teuchos::RCP<TpetraMultiVector> rhs_;
 
-    // Assembly helpers
+    // Assembly helper: Tpetra::CrsMatrix requires its per-row capacity up front (its
+    // constructor's nnz-per-row argument allocates fixed storage; it does not grow
+    // dynamically the way Eigen::SparseMatrix's triplet-based setFromTriplets() does), so the
+    // sparsity pattern has to be known before the matrix is built. add_to_matrix() collects
+    // contributions here; finalize_assembly() sums duplicates per (row, col) and only then
+    // constructs system_matrix_ with an exact per-row entry count.
     struct Triplet {
         int row, col;
         double value;

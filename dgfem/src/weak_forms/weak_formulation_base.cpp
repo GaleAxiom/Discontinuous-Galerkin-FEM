@@ -47,7 +47,7 @@ void TimeIndependentWeakFormulation::assemble(DGAssembler& assembler,
     std::cout << "Volume integrals assembled" << std::endl;
 
     // Face integrals
-    std::set<std::pair<int, int>> processed_faces;
+    std::set<std::pair<std::pair<int, int>, std::pair<int, int>>> processed_faces;
 
     for (int elem_L = 0; elem_L < mesh->get_n_elements(); ++elem_L) {
         auto neighbors = mesh->get_element_neighbors(elem_L);
@@ -57,11 +57,16 @@ void TimeIndependentWeakFormulation::assemble(DGAssembler& assembler,
             int face_R = neighbors[face_L].second;
 
             if (elem_R >= 0) {
-                // Interior face
-                std::pair<int, int> face_sig = (elem_L < elem_R) ? std::make_pair(elem_L, elem_R)
-                                                                 : std::make_pair(elem_R, elem_L);
-                if (processed_faces.find(face_sig) == processed_faces.end()) {
-                    processed_faces.insert(face_sig);
+                // Interior face. Dedup by the (elem,face) pair on each side, not just
+                // (elem_L, elem_R) alone: if two elements ever share more than one face, an
+                // (elem_L, elem_R)-only key would treat the second shared face as already
+                // processed and silently drop its contribution. Matches the finer key
+                // TimeDependentWeakFormulation::assemble() below already uses.
+                std::pair<int, int> pair_L(elem_L, face_L);
+                std::pair<int, int> pair_R(elem_R, face_R);
+                auto face_key = std::minmax(pair_L, pair_R);
+                if (processed_faces.find(face_key) == processed_faces.end()) {
+                    processed_faces.insert(face_key);
 
                     DView2 v_L = mesh->get_element_vertices(elem_L);
                     DView2 v_R = mesh->get_element_vertices(elem_R);
@@ -77,9 +82,22 @@ void TimeIndependentWeakFormulation::assemble(DGAssembler& assembler,
                     assembler.add_to_matrix(elem_R, elem_R, K_RR);
                 }
             } else {
-                // Boundary face (elem_R == -1)
-                // Note: Derived classes must handle boundary conditions appropriately
-                // This is a stub that derived classes should override if needed
+                // Boundary face (elem_R == -1). compute_boundary_face_integral/
+                // compute_boundary_rhs_integral are pure virtual on this base, so every
+                // concrete formulation already implements them -- no need for derived classes
+                // to re-implement this whole loop just to fill in the boundary branch.
+                auto bc = mesh->get_boundary_condition(elem_L, face_L);
+                if (!bc) {
+                    std::cerr << "Warning: No boundary condition set for element " << elem_L
+                              << " face " << face_L << std::endl;
+                    continue;
+                }
+
+                DView2 K_bnd = compute_boundary_face_integral(elem_L, face_L, mesh, bc);
+                assembler.add_to_matrix(elem_L, elem_L, K_bnd);
+
+                DView1 F_bnd = compute_boundary_rhs_integral(elem_L, face_L, mesh, bc);
+                assembler.add_to_rhs(elem_L, F_bnd);
             }
         }
     }

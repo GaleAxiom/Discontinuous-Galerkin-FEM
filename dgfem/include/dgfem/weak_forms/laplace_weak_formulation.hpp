@@ -26,11 +26,10 @@ public:
 
     [[nodiscard]] std::string get_type() const override { return "Laplace"; }
 
-    /**
-     * @brief Custom assembly for Laplace (overrides base class to use BoundaryCondition objects)
-     */
-    void assemble(DGAssembler& assembler, std::function<double(const Vec2&)> source_func = nullptr,
-                  std::function<double(const Vec2&)> bc_func = nullptr) const override;
+    // No assemble() override: TimeIndependentWeakFormulation::assemble() handles boundary
+    // faces generically via compute_boundary_face_integral()/compute_boundary_rhs_integral()
+    // (both implemented below), so Laplace no longer needs its own near-identical copy of the
+    // assembly loop.
 
     /**
      * @brief Compute penalty parameter based on element size and polynomial order

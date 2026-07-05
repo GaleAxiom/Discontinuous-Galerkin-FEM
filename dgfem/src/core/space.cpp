@@ -27,7 +27,7 @@ DView2 scalar_view(const char* label, double value) {
 }
 }  // namespace
 
-DGSpace::DGSpace(std::string_view element_type, int order)
+DGSpace::DGSpace(std::string_view element_type, int order, std::string_view basis_override)
     : order_(order), element_type_(element_type) {
     if (order < 1 || order > 10) {
         std::ostringstream oss;
@@ -40,7 +40,7 @@ DGSpace::DGSpace(std::string_view element_type, int order)
 
     // Create components
     ref_element_ = create_ref_element(element_type_);
-    basis_ = create_basis(element_type_, order);
+    basis_ = create_basis(element_type_, order, basis_override);
     mapping_ = std::make_shared<GeometricMapping>(ref_element_);
 
     // Create quadrature rules
@@ -313,28 +313,20 @@ Vec2 DGSpace::map_face_quad_point(int face_id, double s) const {
     }
 }
 
-std::vector<int> DGSpace::get_dof_to_vertex_map() const {
-    // For a P1 space, the DoFs are located at the vertices.
-    // This assumes the ordering of DoFs in the basis matches the
-    // ordering of vertices in the reference element.
-    if (order_ != 1) {
-        throw std::runtime_error("get_dof_to_vertex_map is only implemented for order 1 elements.");
-    }
-
-    // Get number of dofs directly from the basis to avoid recursion
-    int n_dofs = basis_->get_n_basis();
-    std::vector<int> map(n_dofs);
-    for (int i = 0; i < n_dofs; ++i) {
-        map[i] = i;
-    }
-    return map;
-}
-
-std::shared_ptr<OrthogonalBasis> DGSpace::create_basis(std::string_view element_type,
-                                                       int order) const {
+std::shared_ptr<OrthogonalBasis> DGSpace::create_basis(std::string_view element_type, int order,
+                                                       std::string_view basis_override) const {
     if (element_type == "triangle") {
-        // For triangles, use monomial basis (could also use Dubiner)
-        return std::make_shared<MonomialBasisTriangle>(order);
+        // Orthogonal basis: raw monomials (x^i*y^j) are ill-conditioned at order >= 3 and were
+        // confirmed to contribute to Euler/NS solver divergence at high order (see HANDOFF.md).
+        if (basis_override == "monomial") {
+            return std::make_shared<MonomialBasisTriangle>(order);
+        } else if (basis_override.empty() || basis_override == "dubiner") {
+            return std::make_shared<DubinerBasis>(order);
+        } else {
+            std::ostringstream oss;
+            oss << "Unknown triangle basis_override: " << basis_override;
+            throw std::invalid_argument(oss.str());
+        }
     } else if (element_type == "quad") {
         return std::make_shared<LegendreBasis>(order);
     } else {

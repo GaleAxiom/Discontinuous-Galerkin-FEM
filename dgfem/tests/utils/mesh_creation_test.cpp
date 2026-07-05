@@ -1,9 +1,12 @@
 #include <cmath>
 #include <dgfem/core/mesh.hpp>
+#include <dgfem/core/space.hpp>
 #include <dgfem/kokkos_math.hpp>
 #include <dgfem/reference/elements.hpp>
 #include <dgfem/reference/mapping.hpp>
 #include <dgfem/utils/mesh_creation.hpp>
+
+#include <stdexcept>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -40,6 +43,66 @@ TEST_F(MeshCreationFixture, CreateRectangularMeshTriangles) {
 
     // Verify triangle elements have 3 vertices each
     EXPECT_EQ(mesh_tri->get_elements().extent(1), 3) << "Triangle elements should have 3 vertices";
+}
+
+TEST_F(MeshCreationFixture, SingleElementMeshHasNoInteriorFaces) {
+    // A single quad element (dx = 1.0 on the default unit-square domain) puts every face on
+    // the domain boundary, so face/neighbor indexing should report zero interior faces and
+    // exactly 4 boundary faces -- the minimal case for connectivity code that otherwise only
+    // gets exercised on multi-element meshes.
+    auto mesh = MeshCreator::create_rectangular_mesh(1.0, false);
+    ASSERT_NE(mesh, nullptr);
+    ASSERT_EQ(mesh->get_n_elements(), 1)
+        << "dx=1.0 on the unit square with quads should yield exactly one element";
+
+    auto space = std::make_shared<DGSpace>(mesh->get_element_type(), 1);
+    mesh->initialize_dg_space(space);
+
+    EXPECT_EQ(mesh->get_interior_faces().size(), 0u);
+    EXPECT_EQ(mesh->get_boundary_face_data().size(), 4u);
+}
+
+TEST_F(MeshCreationFixture, SetPeriodicBoundariesPairsLeftRightFaces) {
+    // dx=0.25 gives a 4x4 grid, wide enough that the Left/Right periodic partners aren't
+    // also each other's ordinary interior neighbor (that degenerate overlap happens on a
+    // narrow 2x2 grid, where wrap-around distance equals direct-adjacency distance).
+    auto mesh = MeshCreator::create_rectangular_mesh(0.25, false);
+    auto space = std::make_shared<DGSpace>(mesh->get_element_type(), 1);
+    mesh->initialize_dg_space(space);
+
+    size_t interior_before = mesh->get_interior_faces().size();
+    size_t boundary_before = mesh->get_boundary_face_data().size();
+
+    // Count boundary faces tagged Left/Right before pairing, so the effect of pairing can be
+    // checked without hard-coding the mesh's exact face count.
+    int left_right_before = 0;
+    for (const auto& face : mesh->get_boundary_face_data()) {
+        if (face.bc_tag == "Left" || face.bc_tag == "Right") {
+            ++left_right_before;
+        }
+    }
+    ASSERT_GT(left_right_before, 0) << "Mesh should have Left/Right boundary faces to pair";
+
+    mesh->set_periodic_boundaries("Left", "Right");
+
+    // Every paired Left/Right face moves from boundary to interior connectivity.
+    EXPECT_EQ(mesh->get_boundary_face_data().size(), boundary_before - left_right_before);
+    EXPECT_EQ(mesh->get_interior_faces().size(), interior_before + left_right_before / 2);
+
+    // No remaining boundary face should be tagged Left or Right.
+    for (const auto& face : mesh->get_boundary_face_data()) {
+        EXPECT_NE(face.bc_tag, "Left");
+        EXPECT_NE(face.bc_tag, "Right");
+    }
+}
+
+TEST_F(MeshCreationFixture, SetPeriodicBoundariesThrowsOnUnknownTag) {
+    auto mesh = MeshCreator::create_rectangular_mesh(0.5, false);
+    auto space = std::make_shared<DGSpace>(mesh->get_element_type(), 1);
+    mesh->initialize_dg_space(space);
+
+    EXPECT_THROW(mesh->set_periodic_boundaries("Left", "NoSuchTag"), std::invalid_argument);
+    EXPECT_THROW(mesh->set_periodic_boundaries("NoSuchTag", "Right"), std::invalid_argument);
 }
 
 TEST_F(MeshCreationFixture, CreateRectangularMeshQuads) {

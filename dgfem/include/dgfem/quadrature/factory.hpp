@@ -49,7 +49,7 @@ public:
 
     /**
      * @brief Create 1D Gauss-Legendre quadrature rule
-     * @param n_points Number of quadrature points (1-4)
+     * @param n_points Number of quadrature points (1-8, see MAX_GL_POINTS)
      * @return Quadrature rule on [-1, 1]
      */
     [[nodiscard]] static std::unique_ptr<QuadratureRule> gauss_legendre_1d(int n_points);
@@ -63,7 +63,7 @@ public:
 
     /**
      * @brief Create Dunavant quadrature rule for triangles
-     * @param order Polynomial order to integrate exactly (0-5)
+     * @param order Polynomial order to integrate exactly (0-14, see MAX_DUNAVANT_ORDER)
      * @return Quadrature rule on reference triangle
      */
     [[nodiscard]] static std::unique_ptr<QuadratureRule> dunavant_triangle(int order);

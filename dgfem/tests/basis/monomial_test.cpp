@@ -10,7 +10,9 @@ using namespace dgfem;
 using namespace testing;
 
 TEST(MonomialBasisTriangleTest, ThrowsErrorForInvalidOrder) {
-    EXPECT_THROW(MonomialBasisTriangle(0), std::invalid_argument);  // Below minimum
+    EXPECT_THROW(MonomialBasisTriangle(0), std::invalid_argument);   // Below minimum
+    EXPECT_THROW(MonomialBasisTriangle(-1), std::invalid_argument);  // Negative
+    EXPECT_THROW(MonomialBasisTriangle(-5), std::invalid_argument);  // Negative
     EXPECT_THROW(MonomialBasisTriangle(11),
                  std::invalid_argument);  // Above maximum (MAX_ORDER = 10)
 }

@@ -22,7 +22,15 @@ namespace dgfem {
  */
 class DGSpace {
 public:
-    DGSpace(std::string_view element_type, int order);
+    /**
+     * @param element_type "triangle" or "quad"
+     * @param order Polynomial order
+     * @param basis_override Optional explicit triangle basis selection for tests: "monomial"
+     *        forces MonomialBasisTriangle, "dubiner" forces DubinerBasis, and "" (default)
+     *        keeps the current production default behavior. Ignored for quads (only
+     *        LegendreBasis is available there).
+     */
+    DGSpace(std::string_view element_type, int order, std::string_view basis_override = "");
 
     // Delete copy, default move
     DGSpace(const DGSpace&) = delete;
@@ -78,12 +86,6 @@ public:
      */
     [[nodiscard]] Vec2 map_face_quad_point(int face_id, double s) const;
 
-    /**
-     * @brief Get the mapping from local DoF index to local vertex index.
-     * Assumes a P1 nodal basis where DoFs correspond directly to vertices.
-     */
-    [[nodiscard]] std::vector<int> get_dof_to_vertex_map() const;
-
     // Getters
     [[nodiscard]] int get_order() const noexcept { return order_; }
     [[nodiscard]] int get_n_dofs() const noexcept { return basis_->get_n_basis(); }
@@ -126,8 +128,9 @@ private:
     /**
      * @brief Create appropriate basis for element type
      */
-    [[nodiscard]] std::shared_ptr<OrthogonalBasis> create_basis(std::string_view element_type,
-                                                                int order) const;
+    [[nodiscard]] std::shared_ptr<OrthogonalBasis>
+    create_basis(std::string_view element_type, int order,
+                 std::string_view basis_override = "") const;
 
     /**
      * @brief Create appropriate reference element

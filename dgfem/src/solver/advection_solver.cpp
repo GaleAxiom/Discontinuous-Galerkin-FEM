@@ -5,7 +5,9 @@
 #include <cmath>
 
 #include <iomanip>
+#include <limits>
 #include <sstream>
+#include <stdexcept>
 
 namespace dgfem {
 
@@ -26,14 +28,48 @@ Teuchos::RCP<const TpetraCrsMatrix> AdvectionDGSolver::get_system_matrix() const
     return assembler_->get_system_matrix();
 }
 
+double AdvectionDGSolver::compute_cfl(double dt) const {
+    double speed = std::sqrt(advection_velocity_[0] * advection_velocity_[0] +
+                             advection_velocity_[1] * advection_velocity_[1]);
+
+    double h_min = std::numeric_limits<double>::max();
+    for (int elem_id = 0; elem_id < mesh_->get_n_elements(); ++elem_id) {
+        DView2 vertices = mesh_->get_element_vertices(elem_id);
+        int n_verts = static_cast<int>(vertices.extent(0));
+        for (int i = 0; i < n_verts; ++i) {
+            for (int j = i + 1; j < n_verts; ++j) {
+                double dist = norm(row2(vertices, i) - row2(vertices, j));
+                h_min = std::min(h_min, dist);
+            }
+        }
+    }
+
+    return speed * dt / h_min;
+}
+
 std::vector<Teuchos::RCP<TpetraMultiVector>>
 AdvectionDGSolver::solve(std::function<double(const Vec2&)> initial_condition, double T_final,
                          double dt, std::shared_ptr<BoundaryCondition> boundary_condition,
                          int save_every) {
+    if (dt <= 0.0) {
+        throw std::invalid_argument("Time step dt must be positive");
+    }
+    if (T_final <= 0.0) {
+        throw std::invalid_argument("T_final must be positive");
+    }
+
     std::ostringstream setup_msg;
     setup_msg << "Config: T_final = " << T_final << ", dt = " << dt
               << ", save_every = " << save_every;
     log(Stage::Setup, setup_msg.str());
+
+    double cfl = compute_cfl(dt);
+    std::ostringstream cfl_msg;
+    cfl_msg << "CFL number = " << std::fixed << std::setprecision(4) << cfl;
+    log(Stage::Setup, cfl_msg.str());
+    if (cfl > 1.0) {
+        log(Stage::Setup, "WARNING: CFL exceeds 1.0; results may be unstable.");
+    }
 
     begin_stage(Stage::Projection);
     compute_mass_matrix_inverse_blocks();

@@ -14,6 +14,15 @@
 namespace dgfem {
 
 /**
+ * @brief Threshold below which a Jacobian determinant is treated as singular (degenerate or
+ * inverted element). Shared by GeometricMapping::compute_mapping()'s throw check and
+ * MappingData::is_valid() so the two can't drift apart -- compute_mapping() always throws
+ * before returning a MappingData with |J_T_det| below this, so is_valid() should agree with it
+ * exactly rather than use a separate, tighter bound that could never actually observe false.
+ */
+inline constexpr double kSingularJacobianTolerance = 1e-12;
+
+/**
  * @brief Geometric mapping data computed at a specific point
  * Uses aggregate initialization
  */
@@ -24,8 +33,12 @@ struct MappingData {
     Mat2 dxi_dx;     ///< Inverse Jacobian (dx/dxi)^T
 
     // Utility methods
-    [[nodiscard]] constexpr bool is_valid() const noexcept { return std::abs(J_T_det) > 1e-14; }
+    [[nodiscard]] constexpr bool is_valid() const noexcept {
+        return std::abs(J_T_det) > kSingularJacobianTolerance;
+    }
 
+    // Separate, intentionally looser check: a Jacobian can be non-singular (is_valid() == true)
+    // but still numerically ill-conditioned, e.g. for a very stretched/skewed element.
     [[nodiscard]] constexpr bool is_well_conditioned(double threshold = 1e-6) const noexcept {
         return std::abs(J_T_det) > threshold;
     }

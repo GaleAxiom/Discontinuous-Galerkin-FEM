@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 namespace dgfem {
@@ -226,6 +227,14 @@ CompressibleDGSolverBase::compute_density_range(const StateVector& u_coeffs) con
 std::vector<DView2>
 CompressibleDGSolverBase::run_time_integration(std::function<Vec4(const Vec2&)> initial_condition,
                                                double T_final, double dt, int save_every) {
+    if (dt <= 0.0) {
+        throw std::invalid_argument("Time step dt must be positive");
+    }
+    if (T_final <= 0.0) {
+        throw std::invalid_argument("T_final must be positive");
+    }
+    diverged_ = false;
+
     std::ostringstream intro;
     intro << "Starting " << solver_label_ << " integration (T_final = " << T_final
           << ", dt = " << dt << ", save_every = " << save_every << ")";
@@ -312,32 +321,25 @@ CompressibleDGSolverBase::run_time_integration(std::function<Vec4(const Vec2&)> 
         step++;
         increment_steps();
 
-        bool has_nan = false;
-        for (const auto& elem_coeffs : u_current) {
-            bool elem_has_nan = false;
-            for (int i = 0; i < static_cast<int>(elem_coeffs.extent(0)) && !elem_has_nan; ++i) {
-                for (int v = 0; v < static_cast<int>(elem_coeffs.extent(1)); ++v) {
-                    if (std::isnan(elem_coeffs(i, v))) {
-                        elem_has_nan = true;
-                        break;
-                    }
-                }
-            }
-            if (elem_has_nan) {
-                has_nan = true;
-                break;
-            }
-        }
+        const bool all_ok =
+            std::all_of(u_current.begin(), u_current.end(),
+                        [](const DView2& elem_coeffs) { return all_finite(elem_coeffs); });
 
-        if (has_nan) {
-            log(Stage::TimeStep, "ERROR: Solution contains NaN values; aborting integration.");
+        if (!all_ok) {
+            diverged_ = true;
+            log(Stage::TimeStep,
+                "ERROR: Solution contains non-finite (NaN or Inf) values; aborting integration.");
             break;
         }
     }
 
-    if (step % save_every != 0) {
-        raw_frames.push_back(u_current);
-    }
+    // Always push the true final state (converged or diverged-and-broken-out-of) after the
+    // loop. The in-loop push above only ever appends the state as of the *previous* iteration
+    // (before that iteration's update), so it never pushes what u_current holds right now --
+    // there's no risk of double-pushing here. Guarding this on `step % save_every != 0` (as it
+    // used to be) meant the real final frame was silently dropped whenever save_every evenly
+    // divided the step count, which it does for the default save_every=1.
+    raw_frames.push_back(u_current);
 
     end_stage(Stage::TimeStep);
 

@@ -8,6 +8,13 @@ The project uses GitHub Actions for automated building, testing, and deployment.
 
 ## Workflows
 
+**Status:** only 3 of the workflows described below actually exist in `.github/workflows/`
+today -- `cmake-single-platform.yml`, `code-coverage.yml`, and `format-check.yml` (#1, #3, #5).
+The other 7 (#2, #4, #6-10) are planned/aspirational and marked **(not yet implemented)** below;
+their sections describe the intended design, not current behavior. Check
+`ls .github/workflows/` for the current ground truth rather than assuming this doc is
+exhaustive.
+
 ### 1. CMake Single Platform (`cmake-single-platform.yml`)
 
 **Triggers:** Push to `main`, Pull requests to `main`
@@ -28,7 +35,7 @@ The project uses GitHub Actions for automated building, testing, and deployment.
 
 ---
 
-### 2. Matrix Build & Test (`matrix-build.yml`)
+### 2. Matrix Build & Test (`matrix-build.yml`) (not yet implemented)
 
 **Triggers:** Push to `main`, Pull requests to `main`
 
@@ -78,7 +85,7 @@ The project uses GitHub Actions for automated building, testing, and deployment.
 
 ---
 
-### 4. Static Analysis (`static-analysis.yml`)
+### 4. Static Analysis (`static-analysis.yml`) (not yet implemented)
 
 **Triggers:** Push to `main`, Pull requests to `main`
 
@@ -126,7 +133,7 @@ clang-format -i path/to/file.cpp
 
 ---
 
-### 6. Docker Image Build & Publish (`docker-publish.yml`)
+### 6. Docker Image Build & Publish (`docker-publish.yml`) (not yet implemented)
 
 **Triggers:** 
 - Push to `main` (when Dockerfile or workflow changes)
@@ -160,7 +167,7 @@ docker-compose up dev
 
 ---
 
-### 7. Dependency Security Scan (`dependency-scan.yml`)
+### 7. Dependency Security Scan (`dependency-scan.yml`) (not yet implemented)
 
 **Triggers:** 
 - Push to `main`, Pull requests to `main`
@@ -183,7 +190,7 @@ docker-compose up dev
 
 ---
 
-### 8. Documentation Generation (`documentation.yml`)
+### 8. Documentation Generation (`documentation.yml`) (not yet implemented)
 
 **Triggers:** 
 - Push to `main`, Pull requests to `main`
@@ -210,7 +217,7 @@ docker-compose up dev
 
 ---
 
-### 9. Release Automation (`release.yml`)
+### 9. Release Automation (`release.yml`) (not yet implemented)
 
 **Triggers:** 
 - Push tags matching `v*.*.*`
@@ -235,7 +242,7 @@ git push origin v1.0.0
 
 ---
 
-### 10. PR Labeling (`pr-labels.yml`)
+### 10. PR Labeling (`pr-labels.yml`) (not yet implemented)
 
 **Triggers:** Pull requests (opened, synchronized, reopened)
 

@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# compile_commands.json, consumed by clang-tidy (see .clang-tidy and hooks/pre-commit) so it
+# can resolve Trilinos/Kokkos/GMSH include paths the same way the real build does.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Trilinos: sole linear algebra dependency (see TRILINOS.md for the build recipe --
 # no prebuilt package exists for macOS ARM64, so it must be built from source).
 find_package(Trilinos REQUIRED)
@@ -34,7 +38,15 @@ endif()
 
 # Find GTest (for testing) - only if building tests
 if(BUILD_TESTS)
-    set(CMAKE_PREFIX_PATH "/opt/homebrew" ${CMAKE_PREFIX_PATH})
+    # Homebrew installs outside the default search path on macOS: /opt/homebrew on Apple
+    # Silicon, /usr/local on Intel. Only add paths that actually exist, so this is a no-op on
+    # Linux (where GTest is typically already on the system search path) rather than silently
+    # depending on an Apple-Silicon-only layout.
+    foreach(homebrew_prefix "/opt/homebrew" "/usr/local")
+        if(EXISTS "${homebrew_prefix}")
+            list(APPEND CMAKE_PREFIX_PATH "${homebrew_prefix}")
+        endif()
+    endforeach()
     find_package(GTest REQUIRED)
     if(NOT GTest_FOUND)
         message(FATAL_ERROR "Google Test not found")

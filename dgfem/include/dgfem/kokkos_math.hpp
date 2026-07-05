@@ -18,6 +18,8 @@
 #include <Kokkos_Core.hpp>
 #include <cmath>
 
+#include <stdexcept>
+
 namespace dgfem {
 
 using Vec2 = Kokkos::Array<double, 2>;
@@ -116,6 +118,10 @@ struct Mat2 {
 
     [[nodiscard]] Mat2 inverse() const {
         const double d = det();
+        if (std::abs(d) < 1e-14) {
+            throw std::runtime_error("Mat2::inverse() called on a singular (or near-singular) "
+                                     "matrix -- would silently produce Inf/NaN");
+        }
         return {m11 / d, -m01 / d, -m10 / d, m00 / d};
     }
 
@@ -270,6 +276,10 @@ inline void axpy(DView2& M, double alpha, const DView2& X) {
 /// matrix-vector products use KokkosBlas::gemm/gemv instead (see below) -- this one is just
 /// element-wise indexing, not real linear algebra, so it isn't worth a BLAS call.
 inline void outer_add(DView2& M, double alpha, const DView1& v, const DView1& u) {
+    if (static_cast<int>(M.extent(0)) != static_cast<int>(v.extent(0)) ||
+        static_cast<int>(M.extent(1)) != static_cast<int>(u.extent(0))) {
+        throw std::invalid_argument("outer_add: M's shape must be (v.extent(0), u.extent(0))");
+    }
     for (int i = 0; i < static_cast<int>(v.extent(0)); ++i) {
         for (int j = 0; j < static_cast<int>(u.extent(0)); ++j) {
             M(i, j) += alpha * v[i] * u[j];
@@ -280,6 +290,18 @@ inline void outer_add(DView2& M, double alpha, const DView1& v, const DView1& u)
 /// C = alpha * A * B + beta * C, via KokkosBlas::gemm (Trilinos-provided, not hand-rolled).
 inline void gemm(char transA, char transB, double alpha, const DView2& A, const DView2& B,
                  double beta, DView2& C) {
+    const int a_rows =
+        (transA == 'N') ? static_cast<int>(A.extent(0)) : static_cast<int>(A.extent(1));
+    const int a_cols =
+        (transA == 'N') ? static_cast<int>(A.extent(1)) : static_cast<int>(A.extent(0));
+    const int b_rows =
+        (transB == 'N') ? static_cast<int>(B.extent(0)) : static_cast<int>(B.extent(1));
+    const int b_cols =
+        (transB == 'N') ? static_cast<int>(B.extent(1)) : static_cast<int>(B.extent(0));
+    if (a_cols != b_rows || a_rows != static_cast<int>(C.extent(0)) ||
+        b_cols != static_cast<int>(C.extent(1))) {
+        throw std::invalid_argument("gemm: incompatible shapes for C = alpha*op(A)*op(B) + beta*C");
+    }
     const char ta[2] = {transA, '\0'};
     const char tb[2] = {transB, '\0'};
     KokkosBlas::gemm(ta, tb, alpha, A, B, beta, C);
@@ -288,6 +310,13 @@ inline void gemm(char transA, char transB, double alpha, const DView2& A, const 
 /// y = alpha * A * x + beta * y, via KokkosBlas::gemv (Trilinos-provided, not hand-rolled).
 inline void gemv(char trans, double alpha, const DView2& A, const DView1& x, double beta,
                  DView1& y) {
+    const int a_rows =
+        (trans == 'N') ? static_cast<int>(A.extent(0)) : static_cast<int>(A.extent(1));
+    const int a_cols =
+        (trans == 'N') ? static_cast<int>(A.extent(1)) : static_cast<int>(A.extent(0));
+    if (a_cols != static_cast<int>(x.extent(0)) || a_rows != static_cast<int>(y.extent(0))) {
+        throw std::invalid_argument("gemv: incompatible shapes for y = alpha*op(A)*x + beta*y");
+    }
     const char t[2] = {trans, '\0'};
     KokkosBlas::gemv(t, alpha, A, x, beta, y);
 }
@@ -297,6 +326,9 @@ inline void gemv(char trans, double alpha, const DView2& A, const DView1& x, dou
 /// n_basis x n_basis (not always 2x2, so Mat2 doesn't apply here).
 [[nodiscard]] inline DView2 invert_dense(const DView2& A) {
     const int n = static_cast<int>(A.extent(0));
+    if (static_cast<int>(A.extent(1)) != n) {
+        throw std::invalid_argument("invert_dense: A must be square");
+    }
     DView2 A_copy("invert_dense_A", n, n);
     Kokkos::deep_copy(A_copy, A);
     DView1 workspace("invert_dense_ws", n * n);

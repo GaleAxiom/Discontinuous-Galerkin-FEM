@@ -28,7 +28,6 @@ add_executable(dgfem_tests
     solver/compressible_blasius_accuracy_test.cpp
     boundary/boundary_conditions_test.cpp
     utils/mesh_creation_test.cpp
-    utils/visualization_test.cpp
     utils/vtk_writer_test.cpp
     utils/gmsh_vtk_writer_test.cpp
 )

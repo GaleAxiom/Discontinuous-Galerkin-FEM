@@ -8,9 +8,6 @@
 #include "dgfem/core/mesh.hpp"
 #include "dgfem/core/space.hpp"
 
-#include <chrono>
-#include <iomanip>
-#include <iostream>
 #include <map>
 
 namespace dgfem {
@@ -140,8 +137,10 @@ void DGAssembler::clear_assembly_data() {
 }
 
 void DGAssembler::finalize_assembly() {
-    // Group triplets by row so each row's nonzero columns can be inserted together (Tpetra
-    // has no direct (row, col, value) triplet-list constructor like Eigen::setFromTriplets).
+    // Group triplets by row so each row's nonzero columns can be inserted together, and so
+    // system_matrix_ can be constructed with an exact per-row entry count -- Tpetra::CrsMatrix
+    // has no direct (row, col, value) triplet-list constructor like Eigen::setFromTriplets(),
+    // and (unlike Eigen) its constructor fixes each row's storage capacity up front.
     std::map<TpetraGlobalOrdinal, std::map<TpetraGlobalOrdinal, double>> rows;
     for (const auto& t : triplets_) {
         rows[t.row][t.col] += t.value;
@@ -169,75 +168,54 @@ void DGAssembler::finalize_assembly() {
 
 void DGAssembler::assemble_euler_residual(const std::vector<DView2>& u_coeffs,
                                           std::vector<DView2>& residuals_out) {
-    // if (!euler_weak_form_) {
-    //     throw std::runtime_error("Euler weak formulation not set");
-    // }
-
-    static int call_count = 0;
-    static double total_resize_time = 0.0;
-    static double total_volume_time = 0.0;
-    static double total_visc_volume_time = 0.0;
-    static double total_interior_face_time = 0.0;
-    static double total_interior_visc_time = 0.0;
-    static double total_boundary_face_time = 0.0;
-    static double total_boundary_visc_time = 0.0;
+    // The interior-face loops below (both inviscid and viscous) have a genuine cross-iteration
+    // write hazard on a real concurrent backend: two interior faces can axpy into the *same*
+    // neighboring element's residual (e.g. faces sharing element elem_L or elem_R). This is
+    // only correct under sequential (Serial) execution order; a threaded backend would need
+    // atomics on residuals_out or a graph-coloring pass over faces first. Enforced at compile
+    // time, not just documented, since silently getting this wrong would be a hard-to-notice
+    // race rather than a build failure.
+    static_assert(std::is_same_v<Kokkos::DefaultExecutionSpace, Kokkos::Serial>,
+                  "assemble_euler_residual's interior-face residual loops are only safe under "
+                  "Kokkos::Serial (see comment above) -- they need restructuring (atomics or "
+                  "graph-coloring) before this can build against a threaded default backend.");
 
     int n_elem = mesh_->get_n_elements();
     int n_basis = dg_space_->get_basis()->get_n_basis();
     int n_vars = 4;  // [rho, rho*u, rho*v, E]
 
-    {
-        auto resize_start = std::chrono::high_resolution_clock::now();
-        residuals_out.resize(n_elem);
-        for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
-            auto& elem_residual = residuals_out[elem_id];
-            if (static_cast<int>(elem_residual.extent(0)) != n_basis ||
-                static_cast<int>(elem_residual.extent(1)) != n_vars) {
-                elem_residual = DView2("elem_residual", n_basis, n_vars);
-            } else {
-                Kokkos::deep_copy(elem_residual, 0.0);
-            }
+    residuals_out.resize(n_elem);
+    for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
+        auto& elem_residual = residuals_out[elem_id];
+        if (static_cast<int>(elem_residual.extent(0)) != n_basis ||
+            static_cast<int>(elem_residual.extent(1)) != n_vars) {
+            elem_residual = DView2("elem_residual", n_basis, n_vars);
+        } else {
+            Kokkos::deep_copy(elem_residual, 0.0);
         }
-        auto resize_end = std::chrono::high_resolution_clock::now();
-        total_resize_time += std::chrono::duration<double>(resize_end - resize_start).count();
     }
 
     // Volume contributions
-    auto vol_start = std::chrono::high_resolution_clock::now();
     Kokkos::parallel_for("assemble_volume_residual", n_elem, [&](const int elem_id) {
         const auto& elem_data = mesh_->get_element_data(elem_id);
         residuals_out[elem_id] =
             euler_weak_form_->volume_residual(u_coeffs[elem_id], elem_data, dg_space_);
     });
-    auto vol_end = std::chrono::high_resolution_clock::now();
-    total_volume_time += std::chrono::duration<double>(vol_end - vol_start).count();
 
     const bool has_viscous_terms = euler_weak_form_->has_viscous_terms();
 
     if (has_viscous_terms) {
-        auto visc_vol_start = std::chrono::high_resolution_clock::now();
         Kokkos::parallel_for("assemble_viscous_volume_residual", n_elem, [&](const int elem_id) {
             const auto& elem_data = mesh_->get_element_data(elem_id);
             DView2 R_visc =
                 euler_weak_form_->viscous_volume_residual(u_coeffs[elem_id], elem_data, dg_space_);
             axpy(residuals_out[elem_id], 1.0, R_visc);
         });
-        auto visc_vol_end = std::chrono::high_resolution_clock::now();
-        total_visc_volume_time +=
-            std::chrono::duration<double>(visc_vol_end - visc_vol_start).count();
     }
 
     // Face contributions - using precomputed face data
-    // Process interior faces
-    auto interior_face_start = std::chrono::high_resolution_clock::now();
+    // Process interior faces (see the write-hazard note + static_assert above)
     const auto& interior_faces = mesh_->get_interior_faces();
-    // NOTE: this loop has a genuine cross-iteration write hazard on a real concurrent
-    // backend -- two interior faces can axpy into the *same* neighboring element's
-    // residual (e.g. faces sharing element `elem_L` or `elem_R`). This is safe today
-    // only because Kokkos is built Serial-only (sequential execution order). If Kokkos
-    // is ever built with a threaded backend (OpenMP/Threads/Cuda), this loop MUST be
-    // restructured (e.g. atomics on residuals_out, or a graph-coloring pass over faces)
-    // before enabling real parallelism here.
     Kokkos::parallel_for(
         "assemble_interior_face_residual", interior_faces.size(), [&](const size_t idx) {
             const auto& face = interior_faces[idx];
@@ -251,14 +229,8 @@ void DGAssembler::assemble_euler_residual(const std::vector<DView2>& u_coeffs,
             axpy(residuals_out[face.elem_L], 1.0, R_face_L);
             axpy(residuals_out[face.elem_R], 1.0, R_face_R);
         });
-    auto interior_face_end = std::chrono::high_resolution_clock::now();
-    total_interior_face_time +=
-        std::chrono::duration<double>(interior_face_end - interior_face_start).count();
 
     if (has_viscous_terms) {
-        auto interior_visc_start = std::chrono::high_resolution_clock::now();
-        // Same cross-iteration write hazard as the inviscid interior-face loop above --
-        // safe only under the current Serial-only Kokkos build.
         Kokkos::parallel_for(
             "assemble_interior_face_viscous_residual", interior_faces.size(),
             [&](const size_t idx) {
@@ -272,14 +244,10 @@ void DGAssembler::assemble_euler_residual(const std::vector<DView2>& u_coeffs,
                 axpy(residuals_out[face.elem_L], 1.0, R_visc_L);
                 axpy(residuals_out[face.elem_R], 1.0, R_visc_R);
             });
-        auto interior_visc_end = std::chrono::high_resolution_clock::now();
-        total_interior_visc_time +=
-            std::chrono::duration<double>(interior_visc_end - interior_visc_start).count();
     }
 
     // Process boundary faces (each boundary face touches exactly one element, so no
     // cross-iteration write hazard here, unlike the interior-face loops above).
-    auto boundary_face_start = std::chrono::high_resolution_clock::now();
     const auto& boundary_faces = mesh_->get_boundary_face_data();
     Kokkos::parallel_for(
         "assemble_boundary_face_residual", boundary_faces.size(), [&](const size_t idx) {
@@ -292,12 +260,8 @@ void DGAssembler::assemble_euler_residual(const std::vector<DView2>& u_coeffs,
                 axpy(residuals_out[face.elem_L], 1.0, R_face_bc);
             }
         });
-    auto boundary_face_end = std::chrono::high_resolution_clock::now();
-    total_boundary_face_time +=
-        std::chrono::duration<double>(boundary_face_end - boundary_face_start).count();
 
     if (has_viscous_terms) {
-        auto boundary_visc_start = std::chrono::high_resolution_clock::now();
         Kokkos::parallel_for(
             "assemble_boundary_face_viscous_residual", boundary_faces.size(),
             [&](const size_t idx) {
@@ -309,28 +273,6 @@ void DGAssembler::assemble_euler_residual(const std::vector<DView2>& u_coeffs,
                     axpy(residuals_out[face.elem_L], 1.0, R_visc_bc);
                 }
             });
-        auto boundary_visc_end = std::chrono::high_resolution_clock::now();
-        total_boundary_visc_time +=
-            std::chrono::duration<double>(boundary_visc_end - boundary_visc_start).count();
-    }
-
-    call_count++;
-    // Print timing every 300 calls (100 time steps * 3 RK stages)
-    if (call_count % 300 == 0) {
-        double total_face_time = total_interior_face_time + total_interior_visc_time +
-                                 total_boundary_face_time + total_boundary_visc_time;
-        double total_volume = total_volume_time + total_visc_volume_time;
-        double grand_total = total_resize_time + total_volume + total_face_time;
-
-        std::cout << "[TIMER] Residual assembly (" << call_count << " calls): "
-                  << "Resize=" << std::fixed << std::setprecision(4) << total_resize_time << "s, "
-                  << "Vol=" << total_volume_time << "s, "
-                  << "ViscVol=" << total_visc_volume_time << "s, "
-                  << "IntFace=" << total_interior_face_time << "s, "
-                  << "IntVisc=" << total_interior_visc_time << "s, "
-                  << "BndFace=" << total_boundary_face_time << "s, "
-                  << "BndVisc=" << total_boundary_visc_time << "s, "
-                  << "Total=" << grand_total << "s" << std::endl;
     }
 }
 

@@ -51,7 +51,4 @@ private:
     Config() = default;
 };
 
-// Convenience macros for accessing configuration
-#define DGFEM_CONFIG dgfem::Config::instance()
-
 }  // namespace dgfem

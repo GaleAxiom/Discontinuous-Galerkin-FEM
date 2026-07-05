@@ -38,10 +38,14 @@ NavierStokesWeakFormulation::PrimitiveGradientData
 NavierStokesWeakFormulation::compute_primitive_gradients(const Vec4& U,
                                                          const GradU4& grad_U) const {
     PrimitiveGradientData data;
-    double rho = U[0];
-    double rho_safe = std::max(rho, 1e-12);
+    double rho_safe = std::max(U[0], 1e-12);
 
-    Vec4 W = conserved_to_primitive(U, get_gamma());
+    // Clamp density before converting to primitives, not after: conserved_to_primitive divides
+    // momentum/energy by whatever density it's given, so u/v/p (and everything derived from
+    // them below) must use the same rho_safe as the gradient formulas a few lines down --
+    // otherwise data.u/data.v come from one density and their gradients from another.
+    Vec4 U_safe{rho_safe, U[1], U[2], U[3]};
+    Vec4 W = conserved_to_primitive(U_safe, get_gamma());
     data.rho = W[0];
     data.u = W[1];
     data.v = W[2];

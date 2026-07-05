@@ -21,7 +21,6 @@
 
 #include "assembler.hpp"
 #include "trilinos_types.hpp"
-// #include "time_stepping.hpp"
 #include "weak_form.hpp"
 
 namespace dgfem {
@@ -216,6 +215,14 @@ private:
      */
     [[nodiscard]] Teuchos::RCP<TpetraMultiVector>
     compute_rhs(const Teuchos::RCP<TpetraMultiVector>& u) const;
+
+    /**
+     * @brief CFL number for the given dt: |advection_velocity_| * dt / h_min. Unlike the
+     * compressible solvers, the advection velocity is spatially and temporally constant, so
+     * this only needs the mesh's minimum element size, computed once, rather than a per-step
+     * quadrature-point loop.
+     */
+    [[nodiscard]] double compute_cfl(double dt) const;
 };
 
 /**
@@ -226,6 +233,14 @@ public:
     using StateVector = std::vector<DView2>;
 
     [[nodiscard]] Teuchos::RCP<const TpetraCrsMatrix> get_system_matrix() const override;
+
+    /**
+     * @brief True if the most recent solve() detected a non-finite (NaN/Inf) state and
+     * aborted early. The returned frame history is then a partial run, not a completed one --
+     * callers that care about correctness (as opposed to just inspecting the frames up to
+     * failure) should check this rather than infer failure from frame/step counts.
+     */
+    [[nodiscard]] bool has_diverged() const noexcept { return diverged_; }
 
 protected:
     CompressibleDGSolverBase(std::shared_ptr<DGMesh> mesh,
@@ -251,6 +266,7 @@ private:
     std::vector<DView2> M_inv_blocks_;
     std::string solver_label_;
     mutable StateVector residual_buffer_;
+    bool diverged_{false};
 
     [[nodiscard]] std::vector<DView2> flatten_frames(const std::vector<StateVector>& frames) const;
 };

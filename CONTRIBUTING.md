@@ -119,10 +119,10 @@ cd build && ctest --output-on-failure
  * @param normal Outward normal vector
  * @return Numerical flux vector
  */
-Eigen::VectorXd compute_flux(
-    const Eigen::VectorXd& u_left,
-    const Eigen::VectorXd& u_right,
-    const Eigen::Vector2d& normal
+Vec4 compute_flux(
+    const Vec4& u_left,
+    const Vec4& u_right,
+    const Vec2& normal
 );
 ```
 

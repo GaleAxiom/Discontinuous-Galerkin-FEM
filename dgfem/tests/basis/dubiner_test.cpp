@@ -12,6 +12,8 @@ using namespace testing;
 
 TEST(DubinerBasisTest, ThrowsErrorForInvalidOrder) {
     EXPECT_THROW(DubinerBasis(0), std::invalid_argument);   // Below minimum
+    EXPECT_THROW(DubinerBasis(-1), std::invalid_argument);  // Negative
+    EXPECT_THROW(DubinerBasis(-5), std::invalid_argument);  // Negative
     EXPECT_THROW(DubinerBasis(11), std::invalid_argument);  // Above maximum (MAX_ORDER = 10)
 }
 

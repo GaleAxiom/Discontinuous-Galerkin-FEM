@@ -1,0 +1,41 @@
+---
+# clang-tidy configuration for the DGFEM project.
+#
+# Scope is deliberately narrower than "-checks=*": this is a numerics codebase with large
+# literal quadrature tables and heavy Kokkos/Trilinos template use, so broad style/modernize
+# checks produce mostly noise. The checks enabled below target the bug classes actually found
+# during manual review (missing validation, unguarded division/narrowing, unchecked
+# dimensions before BLAS calls, resource/lifetime issues) rather than stylistic preference --
+# style is already clang-format's job (see .clang-format).
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  clang-analyzer-*,
+  # False-positive-prone for Kokkos::View: the analyzer traces into Kokkos::Impl::
+  # SharedAllocationTracker's intrusive-refcount move/copy swap (Kokkos_SharedAlloc.hpp) and
+  # misreads it as a leak. Confirmed false positive (the real build has no leak here) rather
+  # than a project-specific issue -- a known analyzer limitation with Kokkos's custom
+  # refcounting, not something a NOLINT-per-callsite fix would meaningfully address given how
+  # many call sites construct a View.
+  -clang-analyzer-cplusplus.NewDeleteLeaks,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-narrowing-conversions,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-special-member-functions,
+  performance-*,
+  -performance-avoid-endl,
+  readability-container-size-empty,
+  readability-redundant-smartptr-get,
+  readability-redundant-string-cstr,
+  readability-simplify-boolean-expr,
+  readability-static-accessed-through-instance,
+
+# Only flag issues in this project's own headers -- Trilinos/Kokkos/GMSH/stdlib headers pulled
+# in transitively are out of scope (we can't fix them, and they dwarf real findings with noise).
+HeaderFilterRegex: 'dgfem/(include|src)/.*\.(h|hpp)$'
+
+WarningsAsErrors: ''
+FormatStyle: file

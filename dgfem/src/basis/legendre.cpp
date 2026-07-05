@@ -10,18 +10,13 @@
 #include <cmath>
 #include <numbers>
 
-#include <sstream>
-#include <stdexcept>
-
 namespace dgfem {
 
 LegendreBasis::LegendreBasis(int order)
     : OrthogonalBasisCRTP<LegendreBasis>(std::make_shared<ReferenceQuad>(), order) {
-    if (order > MAX_ORDER) {
-        std::ostringstream oss;
-        oss << "Legendre basis for order " << order << " not supported (max: " << MAX_ORDER << ")";
-        throw std::invalid_argument(oss.str());
-    }
+    // Order bounds are validated once, for every basis type, in OrthogonalBasis's own
+    // constructor (via is_order_valid()) -- MAX_ORDER here exists only to size the fixed
+    // stack arrays below, and happens to equal that same bound.
     n_basis_ = compute_n_basis_impl();
 }
 

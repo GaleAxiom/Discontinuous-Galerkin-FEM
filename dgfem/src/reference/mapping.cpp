@@ -62,7 +62,7 @@ MappingData GeometricMapping::compute_mapping(const DView2& vertices, const Vec2
     // Compute Jacobian determinant
     data.J_T_det = J_T.det();
 
-    if (std::abs(data.J_T_det) < 1e-12) {
+    if (std::abs(data.J_T_det) <= kSingularJacobianTolerance) {
         throw std::runtime_error("Singular Jacobian matrix");
     }
 
@@ -98,6 +98,14 @@ std::optional<Vec2> GeometricMapping::find_reference_coords(const DView2& vertic
 
         // Project to bounds using polymorphic method
         ref_element_->project_to_bounds(xi);
+    }
+
+    // The loop above only checks convergence *before* each iteration's update, so the update
+    // performed on the final permitted iteration was never re-checked -- a point that actually
+    // converges on the last allowed step would otherwise be reported as failed. Check it here.
+    MappingData final_data = compute_mapping(vertices, xi);
+    if (norm(final_data.x_phys - x_phys) < tol) {
+        return xi;
     }
 
     // Convergence failed - return empty optional

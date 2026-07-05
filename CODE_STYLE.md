@@ -61,7 +61,7 @@ The `.clang-format` configuration enforces the following style:
 ### Basic Style
 
 - **Base Style**: LLVM
-- **C++ Standard**: C++17
+- **C++ Standard**: C++20
 - **Indentation**: 4 spaces (no tabs)
 - **Column Limit**: 100 characters
 - **Brace Style**: Attached (K&R style)
@@ -91,7 +91,7 @@ int get_value() const { return value_; }
 
 // Multi-line parameter lists
 void long_function_name(
-    const Eigen::MatrixXd& matrix,
+    const DView2& matrix,
     const std::vector<int>& indices,
     double tolerance);
 ```
@@ -99,10 +99,10 @@ void long_function_name(
 ### Constructor Initializer Lists
 
 ```cpp
-DGMesh::DGMesh(const Eigen::MatrixXd& vertices, const Eigen::MatrixXi& elements)
+DGMesh::DGMesh(const DView2& vertices, const IView2& elements)
     : vertices_(vertices), 
       elements_(elements),
-      n_elements_(elements.rows()) {
+      n_elements_(elements.extent(0)) {
     // Constructor body
 }
 ```
@@ -110,14 +110,14 @@ DGMesh::DGMesh(const Eigen::MatrixXd& vertices, const Eigen::MatrixXi& elements)
 ### Include Order
 
 1. Project headers (`dgfem/...`)
-2. Third-party headers (Eigen, gmsh)
+2. Third-party headers (Trilinos/Kokkos, gmsh)
 3. C++ standard library headers
 4. C standard library headers
 
 ```cpp
 #include "dgfem/core/mesh.hpp"
 #include "dgfem/core/space.hpp"
-#include <Eigen/Dense>
+#include <Kokkos_Core.hpp>
 #include <gmsh.h>
 #include <iostream>
 #include <vector>

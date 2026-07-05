@@ -6,6 +6,8 @@
 #include <dgfem/solver/dg_solver.hpp>
 #include <dgfem/utils/mesh_creation.hpp>
 
+#include <stdexcept>
+
 #include <gmock/gmock.h>
 #include <gmsh.h>
 #include <gtest/gtest.h>
@@ -51,6 +53,85 @@ TEST_F(LaplaceDGSolverTest, SolveWithoutSource) {
     auto solver = std::make_unique<LaplaceDGSolver>(mesh, 10.0);
     auto solution = solver->solve(nullptr);
     EXPECT_EQ(solution.size(), mesh->get_n_elements() * space->get_basis()->get_n_basis());
+}
+
+TEST_F(LaplaceDGSolverTest, AllNeumannWithZeroDataGivesTrivialSolution) {
+    // Pure-Neumann Laplace problems are singular up to an additive constant (no Dirichlet
+    // data pins the solution down). With zero flux data and a zero source term, u = 0 is a
+    // valid particular solution, and Amesos2's direct solve on this mesh resolves to it
+    // without throwing -- this pins that down as a regression check, since a different
+    // singular-system handling policy could just as easily start throwing or returning
+    // garbage here. See NeumannManufacturedSolution/RobinManufacturedSolution below for
+    // coverage of nonzero, non-degenerate Neumann/Robin data.
+    auto space = std::make_shared<DGSpace>("triangle", 1);
+    mesh->initialize_dg_space(space);
+
+    auto bc_neumann = dgfem::make_neumann_bc(0.0);
+    mesh->set_boundary_condition("Bottom", bc_neumann);
+    mesh->set_boundary_condition("Top", bc_neumann);
+    mesh->set_boundary_condition("Left", bc_neumann);
+    mesh->set_boundary_condition("Right", bc_neumann);
+
+    auto solver = std::make_unique<LaplaceDGSolver>(mesh, 10.0);
+
+    DView1 solution;
+    EXPECT_NO_THROW(solution = solver->solve(nullptr));
+    EXPECT_NEAR(norm(solution), 0.0, 1e-10);
+}
+
+TEST_F(LaplaceDGSolverTest, NeumannBoundaryRecoversLinearManufacturedSolution) {
+    // u(x,y) = 2x + 3y + 1 is harmonic (zero source) and linear, so it lies exactly in the P1
+    // DG space. Galerkin/Nitsche consistency means a correctly implemented Neumann BC should
+    // let the solver reproduce it essentially exactly, not just approximately -- this exercises
+    // the compute_boundary_rhs_integral NEUMANN branch (laplace_weak_formulation.cpp) with a
+    // genuinely non-zero flux, unlike the all-zero-data regression test above.
+    auto space = std::make_shared<DGSpace>("triangle", 1);
+    mesh->initialize_dg_space(space);
+
+    auto exact_solution = [](const Vec2& x) -> double { return 2.0 * x[0] + 3.0 * x[1] + 1.0; };
+    auto exact_gradient = [](const Vec2&) -> Vec2 { return Vec2{2.0, 3.0}; };
+
+    // Dirichlet on Left/Right/Top using the exact trace; Neumann on Bottom using the exact
+    // outward flux du/dn = grad(u)*(0,-1) = -3.
+    mesh->set_boundary_condition("Left", dgfem::make_dirichlet_bc(exact_solution));
+    mesh->set_boundary_condition("Right", dgfem::make_dirichlet_bc(exact_solution));
+    mesh->set_boundary_condition("Top", dgfem::make_dirichlet_bc(exact_solution));
+    mesh->set_boundary_condition("Bottom", dgfem::make_neumann_bc(-3.0));
+
+    auto solver = std::make_unique<LaplaceDGSolver>(mesh, 10.0);
+    solver->solve(nullptr);
+
+    auto errors = solver->compute_error(exact_solution, exact_gradient);
+    EXPECT_NEAR(errors["L2"], 0.0, 1e-8);
+    EXPECT_NEAR(errors["H1"], 0.0, 1e-8);
+}
+
+TEST_F(LaplaceDGSolverTest, RobinBoundaryRecoversLinearManufacturedSolution) {
+    // Same manufactured solution as above, but the Top boundary uses a Robin condition
+    // alpha*u + du/dn = g with alpha = 2.0: g(x, 1) = alpha*(2x + 3 + 1) + 3, which varies
+    // with x and so exercises the position-dependent BC evaluation path for the ROBIN branch.
+    auto space = std::make_shared<DGSpace>("triangle", 1);
+    mesh->initialize_dg_space(space);
+
+    auto exact_solution = [](const Vec2& x) -> double { return 2.0 * x[0] + 3.0 * x[1] + 1.0; };
+    auto exact_gradient = [](const Vec2&) -> Vec2 { return Vec2{2.0, 3.0}; };
+
+    const double alpha = 2.0;
+    auto robin_data = [alpha, exact_solution](const Vec2& x) -> double {
+        return alpha * exact_solution(x) + 3.0;  // alpha*u + du/dn, du/dn = 3 on Top
+    };
+
+    mesh->set_boundary_condition("Left", dgfem::make_dirichlet_bc(exact_solution));
+    mesh->set_boundary_condition("Right", dgfem::make_dirichlet_bc(exact_solution));
+    mesh->set_boundary_condition("Bottom", dgfem::make_dirichlet_bc(exact_solution));
+    mesh->set_boundary_condition("Top", dgfem::make_robin_bc(robin_data, alpha));
+
+    auto solver = std::make_unique<LaplaceDGSolver>(mesh, 10.0);
+    solver->solve(nullptr);
+
+    auto errors = solver->compute_error(exact_solution, exact_gradient);
+    EXPECT_NEAR(errors["L2"], 0.0, 1e-8);
+    EXPECT_NEAR(errors["H1"], 0.0, 1e-8);
 }
 
 TEST_F(LaplaceDGSolverTest, SolveWithSource) {
@@ -169,7 +250,10 @@ TEST_F(LaplaceDGSolverTest, FullSolver) {
 }
 
 TEST_F(LaplaceDGSolverTest, SystemMatrixTest) {
-    auto space = std::make_shared<DGSpace>("triangle", 1);
+    // Explicit "monomial" override: the golden matrix below is tied to
+    // MonomialBasisTriangle's specific representation, independent of whichever basis
+    // DGSpace::create_basis picks by default for triangles.
+    auto space = std::make_shared<DGSpace>("triangle", 1, "monomial");
     mesh->initialize_dg_space(space);
 
     auto bc_zero = dgfem::make_dirichlet_bc(0.0);
@@ -223,6 +307,198 @@ TEST_F(LaplaceDGSolverTest, SystemMatrixTest) {
     for (int i = 0; i < static_cast<int>(expected_matrix.extent(0)); ++i) {
         for (int j = 0; j < static_cast<int>(expected_matrix.extent(1)); ++j) {
             EXPECT_NEAR(system_matrix_dense(i, j), expected_matrix(i, j), 1e-5);
+        }
+    }
+}
+
+TEST_F(LaplaceDGSolverTest, SystemMatrixTestDubinerBasis) {
+    // Same setup as SystemMatrixTest above, but forcing the orthogonal DubinerBasis instead
+    // of MonomialBasisTriangle, so both bases get real regression coverage of this solver's
+    // assembled system matrix.
+    auto space = std::make_shared<DGSpace>("triangle", 1, "dubiner");
+    mesh->initialize_dg_space(space);
+
+    auto bc_zero = dgfem::make_dirichlet_bc(0.0);
+    mesh->set_boundary_condition("Bottom", bc_zero);
+    mesh->set_boundary_condition("Top", bc_zero);
+    mesh->set_boundary_condition("Left", bc_zero);
+    mesh->set_boundary_condition("Right", bc_zero);
+
+    auto solver = std::make_unique<LaplaceDGSolver>(mesh, 10.0);
+
+    solver->solve(nullptr);
+
+    auto system_matrix_sparse = solver->get_system_matrix();
+    DView2 system_matrix_dense = tpetra_to_dense(*system_matrix_sparse);
+
+    // Golden matrix captured from running this exact setup with DubinerBasis (not hand-derived
+    // like the MonomialBasisTriangle case above -- Dubiner's Jacobi-polynomial closed form
+    // makes hand derivation impractical for a full 4-element assembled system). Sanity-checked
+    // below: symmetric (required for this self-adjoint SIPG formulation, regardless of basis).
+    double expected_flat[144] = {480,
+                                 0,
+                                 16.97056275,
+                                 -160,
+                                 -191.0601999,
+                                 -104.6518036,
+                                 -160,
+                                 191.0601999,
+                                 -104.6518036,
+                                 0,
+                                 0,
+                                 0,
+                                 0,
+                                 960,
+                                 0,
+                                 191.0601999,
+                                 308,
+                                 -13.85640646,
+                                 -191.0601999,
+                                 308,
+                                 13.85640646,
+                                 0,
+                                 0,
+                                 0,
+                                 16.97056275,
+                                 0,
+                                 912,
+                                 -104.6518036,
+                                 13.85640646,
+                                 -308,
+                                 -104.6518036,
+                                 -13.85640646,
+                                 -308,
+                                 0,
+                                 0,
+                                 0,
+                                 -160,
+                                 191.0601999,
+                                 -104.6518036,
+                                 480,
+                                 0,
+                                 16.97056275,
+                                 0,
+                                 0,
+                                 0,
+                                 -160,
+                                 -191.0601999,
+                                 -104.6518036,
+                                 -191.0601999,
+                                 308,
+                                 13.85640646,
+                                 0,
+                                 960,
+                                 0,
+                                 0,
+                                 0,
+                                 0,
+                                 191.0601999,
+                                 308,
+                                 -13.85640646,
+                                 -104.6518036,
+                                 -13.85640646,
+                                 -308,
+                                 16.97056275,
+                                 0,
+                                 912,
+                                 0,
+                                 0,
+                                 0,
+                                 -104.6518036,
+                                 13.85640646,
+                                 -308,
+                                 -160,
+                                 -191.0601999,
+                                 -104.6518036,
+                                 0,
+                                 0,
+                                 0,
+                                 480,
+                                 0,
+                                 16.97056275,
+                                 -160,
+                                 191.0601999,
+                                 -104.6518036,
+                                 191.0601999,
+                                 308,
+                                 -13.85640646,
+                                 0,
+                                 0,
+                                 0,
+                                 0,
+                                 960,
+                                 0,
+                                 -191.0601999,
+                                 308,
+                                 13.85640646,
+                                 -104.6518036,
+                                 13.85640646,
+                                 -308,
+                                 0,
+                                 0,
+                                 0,
+                                 16.97056275,
+                                 0,
+                                 912,
+                                 -104.6518036,
+                                 -13.85640646,
+                                 -308,
+                                 0,
+                                 0,
+                                 0,
+                                 -160,
+                                 191.0601999,
+                                 -104.6518036,
+                                 -160,
+                                 -191.0601999,
+                                 -104.6518036,
+                                 480,
+                                 0,
+                                 16.97056275,
+                                 0,
+                                 0,
+                                 0,
+                                 -191.0601999,
+                                 308,
+                                 13.85640646,
+                                 191.0601999,
+                                 308,
+                                 -13.85640646,
+                                 0,
+                                 960,
+                                 0,
+                                 0,
+                                 0,
+                                 0,
+                                 -104.6518036,
+                                 -13.85640646,
+                                 -308,
+                                 -104.6518036,
+                                 13.85640646,
+                                 -308,
+                                 16.97056275,
+                                 0,
+                                 912};
+    DView2 expected_matrix("expected_matrix", 12, 12);
+    for (int i = 0; i < 12; ++i) {
+        for (int j = 0; j < 12; ++j) {
+            expected_matrix(i, j) = expected_flat[i * 12 + j];
+        }
+    }
+
+    ASSERT_EQ(system_matrix_dense.extent(0), expected_matrix.extent(0));
+    ASSERT_EQ(system_matrix_dense.extent(1), expected_matrix.extent(1));
+
+    for (int i = 0; i < static_cast<int>(expected_matrix.extent(0)); ++i) {
+        for (int j = 0; j < static_cast<int>(expected_matrix.extent(1)); ++j) {
+            EXPECT_NEAR(system_matrix_dense(i, j), expected_matrix(i, j), 1e-5);
+        }
+    }
+
+    for (int i = 0; i < static_cast<int>(system_matrix_dense.extent(0)); ++i) {
+        for (int j = 0; j < static_cast<int>(system_matrix_dense.extent(1)); ++j) {
+            EXPECT_NEAR(system_matrix_dense(i, j), system_matrix_dense(j, i), 1e-5)
+                << "Matrix not symmetric at (" << i << "," << j << ")";
         }
     }
 }
@@ -306,6 +582,20 @@ TEST_F(AdvectionDGSolverTest, ElementIntegralComputation) {
     DView2 L_elem = weak_form->compute_volume_integral(elem_data, space);
     EXPECT_EQ(L_elem.extent(0), n_basis);
     EXPECT_EQ(L_elem.extent(1), n_basis);
+}
+
+TEST_F(AdvectionDGSolverTest, SolveRejectsNonPositiveDtOrTFinal) {
+    auto space = std::make_shared<DGSpace>("triangle", 1);
+    mesh->initialize_dg_space(space);
+
+    Vec2 velocity{1.0, 0.0};
+    AdvectionDGSolver solver(mesh, velocity);
+    auto ic = [](const Vec2&) { return 0.0; };
+
+    EXPECT_THROW(solver.solve(ic, 1.0, 0.0), std::invalid_argument);
+    EXPECT_THROW(solver.solve(ic, 1.0, -0.1), std::invalid_argument);
+    EXPECT_THROW(solver.solve(ic, 0.0, 0.1), std::invalid_argument);
+    EXPECT_THROW(solver.solve(ic, -1.0, 0.1), std::invalid_argument);
 }
 
 TEST_F(AdvectionDGSolverTest, WeakFormVelocityFields) {

@@ -17,13 +17,14 @@
 namespace dgfem {
 
 void MeshCreator::initialize_gmsh() {
-    // Initialize GMSH if not already initialized
-    // Note: gmsh::isInitialized() is not available in all GMSH versions
-    // We use a try-catch approach instead
-    try {
+    // gmsh::isInitialized() lets us tell "already initialized" apart from a genuine init
+    // failure (bad install, missing plugin). Catching every exception from initialize() and
+    // assuming it always means "already initialized" (the previous approach) would silently
+    // mask a real failure as success instead.
+    if (!gmsh::isInitialized()) {
         gmsh::initialize();
-    } catch (...) {
-        // Already initialized, clear any leftover models
+    } else {
+        // Already initialized: clear any leftover models from a previous mesh.
         gmsh::clear();
     }
 
@@ -302,6 +303,18 @@ void MeshCreator::extract_mesh_data(
 
     if (elem_types.empty()) {
         throw std::runtime_error("No 2D elements found in GMSH model");
+    }
+    if (elem_types.size() > 1) {
+        // DGMesh/DGSpace assume a single homogeneous element type per mesh (one
+        // n_nodes_per_elem, one element_type_ string) -- only elem_types[0] was ever read
+        // here, so a model that mixes e.g. triangles and quads would silently drop every
+        // element of the second type instead of erroring. Fail loudly instead: mixed-type
+        // meshes need real heterogeneous-element support elsewhere first, not a silent
+        // partial read here.
+        throw std::runtime_error(
+            "GMSH model has " + std::to_string(elem_types.size()) +
+            " distinct 2D element types; DGMesh only supports a single homogeneous element "
+            "type per mesh (e.g. all triangles or all quads)");
     }
 
     int elem_type = elem_types[0];

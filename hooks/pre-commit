@@ -20,7 +20,6 @@ elif [ -f "/usr/local/opt/llvm/bin/clang-format" ]; then
     CLANG_FORMAT="/usr/local/opt/llvm/bin/clang-format"
 else
     echo -e "${YELLOW}Warning: clang-format not found. Skipping format check.${NC}"
-    exit 0
 fi
 
 # Get list of staged C++ files
@@ -31,31 +30,97 @@ if [ -z "$STAGED_FILES" ]; then
     exit 0
 fi
 
-echo "Checking code formatting..."
+if [ -n "$CLANG_FORMAT" ]; then
+    echo "Checking code formatting..."
 
-# Check each staged file
-needs_formatting=0
-for file in $STAGED_FILES; do
-    if [ -f "$file" ]; then
-        # Check if file needs formatting
-        if ! "$CLANG_FORMAT" --dry-run --Werror "$file" 2>/dev/null; then
-            echo -e "${RED}✗${NC} $file needs formatting"
-            needs_formatting=1
-        else
-            echo -e "${GREEN}✓${NC} $file"
+    # Check each staged file
+    needs_formatting=0
+    for file in $STAGED_FILES; do
+        if [ -f "$file" ]; then
+            # Check if file needs formatting
+            if ! "$CLANG_FORMAT" --dry-run --Werror "$file" 2>/dev/null; then
+                echo -e "${RED}✗${NC} $file needs formatting"
+                needs_formatting=1
+            else
+                echo -e "${GREEN}✓${NC} $file"
+            fi
         fi
+    done
+
+    if [ $needs_formatting -eq 1 ]; then
+        echo ""
+        echo -e "${RED}Some files need formatting!${NC}"
+        echo -e "Run ${YELLOW}./format-code.sh${NC} to format all files, or format specific files with:"
+        echo -e "  ${YELLOW}clang-format -i <file>${NC}"
+        echo ""
+        echo "Then stage the formatted files and commit again."
+        exit 1
+    fi
+
+    echo -e "${GREEN}All staged files are properly formatted!${NC}"
+fi
+
+# --- clang-tidy, restricted to the lines this commit actually changes ---
+#
+# Runs on diff hunks only (via clang-tidy-diff.py), not whole files: this repo has a lot of
+# pre-existing findings (see the codebase audit) and a naive whole-file run would block every
+# commit that merely touches a file with unrelated old issues in it. Needs compile_commands.json
+# (CMAKE_EXPORT_COMPILE_COMMANDS is ON in dgfem/CMakeLists.txt) to resolve Trilinos/Kokkos/GMSH
+# include paths -- skips gracefully if the project hasn't been configured/built yet.
+
+CLANG_TIDY=""
+if command -v clang-tidy &> /dev/null; then
+    CLANG_TIDY="clang-tidy"
+elif [ -f "/opt/homebrew/opt/llvm/bin/clang-tidy" ]; then
+    CLANG_TIDY="/opt/homebrew/opt/llvm/bin/clang-tidy"
+elif [ -f "/usr/local/opt/llvm/bin/clang-tidy" ]; then
+    CLANG_TIDY="/usr/local/opt/llvm/bin/clang-tidy"
+fi
+
+CLANG_TIDY_DIFF=""
+for candidate in \
+    "$(command -v clang-tidy-diff.py 2>/dev/null)" \
+    "/opt/homebrew/opt/llvm/share/clang/clang-tidy-diff.py" \
+    "/usr/local/opt/llvm/share/clang/clang-tidy-diff.py"; do
+    if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+        CLANG_TIDY_DIFF="$candidate"
+        break
     fi
 done
 
-if [ $needs_formatting -eq 1 ]; then
+COMPILE_DB="$(git rev-parse --show-toplevel)/build"
+
+if [ -z "$CLANG_TIDY" ] || [ -z "$CLANG_TIDY_DIFF" ]; then
+    echo -e "${YELLOW}Warning: clang-tidy or clang-tidy-diff.py not found. Skipping static analysis.${NC}"
+    exit 0
+fi
+
+if [ ! -f "$COMPILE_DB/compile_commands.json" ]; then
+    echo -e "${YELLOW}Warning: $COMPILE_DB/compile_commands.json not found (configure/build the project first). Skipping static analysis.${NC}"
+    exit 0
+fi
+
+echo ""
+echo "Running clang-tidy on changed lines..."
+
+# .cpp files only: compile_commands.json has a real compile command for each translation unit,
+# but none for standalone headers. Pointing clang-tidy-diff at a changed .hpp directly makes it
+# fall back to a best-guess/default command with none of this project's Kokkos/Trilinos include
+# paths, which manifests as bogus "no member named 'Serial' in namespace 'Kokkos'"-style errors
+# rather than real findings. Header changes still get checked indirectly through any .cpp that
+# includes them.
+TIDY_OUTPUT=$(git diff --cached -U0 --diff-filter=ACM -- '*.cpp' \
+    | python3 "$CLANG_TIDY_DIFF" -p1 -path "$COMPILE_DB" -clang-tidy-binary "$CLANG_TIDY" -quiet 2>&1)
+
+# clang-tidy-diff.py exits 0 even when it finds warnings/errors; detect them by content instead.
+if echo "$TIDY_OUTPUT" | grep -qE '(warning|error): '; then
+    echo "$TIDY_OUTPUT"
     echo ""
-    echo -e "${RED}Some files need formatting!${NC}"
-    echo -e "Run ${YELLOW}./format-code.sh${NC} to format all files, or format specific files with:"
-    echo -e "  ${YELLOW}clang-format -i <file>${NC}"
-    echo ""
-    echo "Then stage the formatted files and commit again."
+    echo -e "${RED}clang-tidy found issues in changed lines!${NC}"
+    echo "Fix them, or if a finding is a false positive for this line, silence it with a"
+    echo "// NOLINT(check-name) comment rather than disabling the check project-wide."
     exit 1
 fi
 
-echo -e "${GREEN}All staged files are properly formatted!${NC}"
+echo -e "${GREEN}clang-tidy: no issues in changed lines.${NC}"
 exit 0

@@ -8,17 +8,21 @@
 #include "dgfem/core/mesh.hpp"
 #include "dgfem/core/space.hpp"
 #include "dgfem/reference/mapping.hpp"
-#include "dgfem/solver/assembler.hpp"
 
 #include <cmath>
 
 #include <iostream>
-#include <set>
+#include <stdexcept>
 
 namespace dgfem {
 
 LaplaceWeakFormulation::LaplaceWeakFormulation(double penalty_parameter)
-    : sigma_0_(penalty_parameter) {}
+    : sigma_0_(penalty_parameter) {
+    if (sigma_0_ <= 0.0) {
+        throw std::invalid_argument(
+            "Penalty parameter must be positive for Laplace weak formulation");
+    }
+}
 
 double LaplaceWeakFormulation::compute_penalty_parameter(int p, double h) const {
     if (h < 1e-12)
@@ -189,6 +193,23 @@ DView2 LaplaceWeakFormulation::compute_boundary_face_integral(
             outer_add(K_boundary, -w_q, C_vec, u);
             outer_add(K_boundary, sigma * w_q, v, u);
         }
+    } else if (bc && bc->get_type() == BCType::NEUMANN) {
+        // Natural BC (du/dn = g): the flux is prescribed directly, so it contributes only
+        // to the RHS (see compute_boundary_rhs_integral) -- no stiffness contribution and no
+        // SIPG penalty term, since that penalty exists solely to weakly enforce Dirichlet data.
+    } else if (bc && bc->get_type() == BCType::ROBIN) {
+        // Robin BC (alpha*u + du/dn = g): substituting du/dn = g - alpha*u into the
+        // boundary flux term -∫(du/dn)v ds turns it into a mass-like +alpha∫u*v ds
+        // contribution to the matrix, plus a +∫g*v ds RHS term (compute_boundary_rhs_integral).
+        double alpha = bc->get_robin_alpha();
+        for (int q = 0; q < n_face_quad; ++q) {
+            double w_q = face_weights[q] * face_length * 0.5;
+
+            DView1 v = row_of(phi, q);
+            const DView1& u = v;
+
+            outer_add(K_boundary, alpha * w_q, v, u);
+        }
     } else {
         std::cout << "No valid boundary condition provided for element " << elem_id << " face "
                   << face_id << ". Skipping boundary integral." << std::endl;
@@ -307,87 +328,39 @@ LaplaceWeakFormulation::compute_boundary_rhs_integral(int elem_id, int face_id,
                     w_q * (sigma * bc_value * phi_i - bc_value * dot(grad_phi_i, normal));
             }
         }
-    }
+    } else if (bc->get_type() == BCType::NEUMANN || bc->get_type() == BCType::ROBIN) {
+        // Both are natural BCs with a prescribed flux datum g (du/dn = g for Neumann,
+        // du/dn = g - alpha*u for Robin -- the alpha*u part is handled as a matrix term in
+        // compute_boundary_face_integral). Either way the RHS contribution is simply
+        // ∫ g*v ds; no gradient/penalty terms are involved since there's no weak enforcement
+        // of a trace value here.
+        const auto& face_data = mesh->get_face_data(elem_id, face_id);
+        double face_length = scalar_of(face_data.at("length"));
 
-    return F_boundary;
-}
+        const std::vector<DView2>& phi_face = dg_space->get_face_basis_values();
+        const DView1& face_weights = dg_space->get_face_quad()->weights;
 
-void LaplaceWeakFormulation::assemble(DGAssembler& assembler,
-                                      std::function<double(const Vec2&)> source_func,
-                                      std::function<double(const Vec2&)> bc_func) const {
-    auto mesh = assembler.get_mesh();
-    auto dg_space = assembler.get_dg_space();
+        int n_face_quad = static_cast<int>(face_weights.extent(0));
+        const DView2& phi = phi_face[face_id];
 
-    assembler.clear_assembly_data();
+        DView2 vertices = mesh->get_element_vertices(elem_id);
+        auto mapping = dg_space->get_mapping();
+        const DView2& face_quad_points = dg_space->get_face_quad()->points;
 
-    std::cout << "\nAssembling Laplace system..." << std::endl;
+        for (int q = 0; q < n_face_quad; ++q) {
+            Vec2 xi_face = dg_space->map_face_quad_point(face_id, face_quad_points(q, 0));
+            Vec2 x_quad = mapping->map_to_physical(vertices, xi_face);
 
-    // Volume integrals
-    for (int elem_id = 0; elem_id < mesh->get_n_elements(); ++elem_id) {
-        const auto& elem_data = mesh->get_element_data(elem_id);
-        DView2 K_vol = compute_volume_integral(elem_data, dg_space);
-        assembler.add_to_matrix(elem_id, elem_id, K_vol);
+            double bc_value = bc->evaluate(x_quad);
+            double w_q = face_weights[q] * face_length * 0.5;
 
-        // Source term
-        if (source_func) {
-            DView1 F_src = compute_source_integral(elem_id, source_func, mesh);
-            assembler.add_to_rhs(elem_id, F_src);
-        }
-    }
-
-    std::cout << "Volume integrals assembled" << std::endl;
-
-    // Face integrals
-    std::set<std::pair<int, int>> processed_faces;
-
-    for (int elem_L = 0; elem_L < mesh->get_n_elements(); ++elem_L) {
-        auto neighbors = mesh->get_element_neighbors(elem_L);
-
-        for (int face_L = 0; face_L < static_cast<int>(neighbors.size()); ++face_L) {
-            int elem_R = neighbors[face_L].first;
-            int face_R = neighbors[face_L].second;
-
-            if (elem_R >= 0) {
-                // Interior face
-                std::pair<int, int> face_sig = (elem_L < elem_R) ? std::make_pair(elem_L, elem_R)
-                                                                 : std::make_pair(elem_R, elem_L);
-                if (processed_faces.find(face_sig) == processed_faces.end()) {
-                    processed_faces.insert(face_sig);
-
-                    DView2 v_L = mesh->get_element_vertices(elem_L);
-                    DView2 v_R = mesh->get_element_vertices(elem_R);
-
-                    auto perm = dg_space->compute_face_permutation(face_L, v_L, face_R, v_R);
-
-                    auto [K_LL, K_LR, K_RL, K_RR] =
-                        compute_interior_face_integral(elem_L, face_L, elem_R, face_R, mesh, perm);
-
-                    assembler.add_to_matrix(elem_L, elem_L, K_LL);
-                    assembler.add_to_matrix(elem_L, elem_R, K_LR);
-                    assembler.add_to_matrix(elem_R, elem_L, K_RL);
-                    assembler.add_to_matrix(elem_R, elem_R, K_RR);
-                }
-            } else {
-                // Boundary face (elem_R == -1)
-                auto bc = mesh->get_boundary_condition(elem_L, face_L);
-                if (!bc) {
-                    std::cerr << "Warning: No boundary condition set for element " << elem_L
-                              << " face " << face_L << std::endl;
-                    continue;
-                }
-
-                DView2 K_bnd = compute_boundary_face_integral(elem_L, face_L, mesh, bc);
-                assembler.add_to_matrix(elem_L, elem_L, K_bnd);
-
-                DView1 F_bnd = compute_boundary_rhs_integral(elem_L, face_L, mesh, bc);
-                assembler.add_to_rhs(elem_L, F_bnd);
+            for (int i = 0; i < n_basis; ++i) {
+                F_boundary[i] += w_q * bc_value * phi(q, i);
             }
         }
     }
 
-    std::cout << "Face integrals assembled" << std::endl;
-
-    assembler.finalize_assembly();
+    return F_boundary;
 }
 
 }  // namespace dgfem

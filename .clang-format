@@ -6,7 +6,7 @@ BasedOnStyle: LLVM
 
 # Language settings
 Language: Cpp
-Standard: c++17
+Standard: c++20
 
 # Indentation
 IndentWidth: 4
