@@ -21,6 +21,12 @@ else()
         INTERFACE_INCLUDE_DIRECTORIES "${EIGEN3_INCLUDE_DIR}")
 endif()
 
+# Trilinos: replaces Eigen for all linear algebra (see TRILINOS.md for the build recipe --
+# no prebuilt package exists for macOS ARM64, so it must be built from source). Both are
+# linked during the migration; Eigen is being removed incrementally, package by package.
+find_package(Trilinos REQUIRED)
+message(STATUS "Found Trilinos ${Trilinos_VERSION} at ${Trilinos_DIR}")
+
 # Find GMSH
 find_path(GMSH_INCLUDE_DIR gmsh.h)
 find_library(GMSH_LIBRARY NAMES gmsh)
@@ -76,9 +82,10 @@ target_compile_definitions(dgfem PRIVATE
 )
 
 # Link libraries
-target_link_libraries(dgfem 
-    PUBLIC 
+target_link_libraries(dgfem
+    PUBLIC
         Eigen3::Eigen
+        Trilinos::all_libs
         ${GMSH_LIBRARY}
 )
 
@@ -101,6 +108,11 @@ endif()
 if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
+
+# Trilinos toolchain smoke test (Milestone 1 of the migration -- see plan/TRILINOS.md):
+# proves Kokkos init + Tpetra assembly + Amesos2 solve work end to end, independent of the
+# rest of the library.
+add_subdirectory(trilinos_smoke_test)
 
 # Installation
 install(TARGETS dgfem

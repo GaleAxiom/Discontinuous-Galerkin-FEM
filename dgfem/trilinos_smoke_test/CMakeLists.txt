@@ -1,0 +1,2 @@
+add_executable(trilinos_smoke_test trilinos_smoke_test.cpp)
+target_link_libraries(trilinos_smoke_test PRIVATE Trilinos::all_libs)
