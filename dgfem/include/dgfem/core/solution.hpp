@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <Eigen/Dense>
+#include "dgfem/kokkos_math.hpp"
 
 #include <vector>
 
@@ -29,32 +29,32 @@ public:
      * @param elem_id Element index
      * @return Matrix of size (n_basis x n_variables)
      */
-    [[nodiscard]] Eigen::MatrixXd get_element_coeffs(int elem_id) const;
+    [[nodiscard]] DView2 get_element_coeffs(int elem_id) const;
 
     /**
      * @brief Set element coefficients for all variables
      */
-    void set_element_coeffs(int elem_id, const Eigen::MatrixXd& coeffs);
+    void set_element_coeffs(int elem_id, const DView2& coeffs);
 
     /**
      * @brief Get element coefficients for specific variable
      */
-    [[nodiscard]] Eigen::VectorXd get_element_coeffs(int elem_id, int var_id) const;
+    [[nodiscard]] DView1 get_element_coeffs(int elem_id, int var_id) const;
 
     /**
      * @brief Set element coefficients for specific variable
      */
-    void set_element_coeffs(int elem_id, int var_id, const Eigen::VectorXd& coeffs);
+    void set_element_coeffs(int elem_id, int var_id, const DView1& coeffs);
 
     /**
      * @brief Get all coefficients as a flat vector
      */
-    [[nodiscard]] Eigen::VectorXd get_global_coeffs() const;
+    [[nodiscard]] DView1 get_global_coeffs() const;
 
     /**
      * @brief Set all coefficients from a flat vector
      */
-    void set_global_coeffs(const Eigen::VectorXd& coeffs);
+    void set_global_coeffs(const DView1& coeffs);
 
     /**
      * @brief Zero out all coefficients

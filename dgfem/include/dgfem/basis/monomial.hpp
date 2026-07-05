@@ -14,15 +14,16 @@ namespace dgfem {
  *
  * Implements basis functions of the form x^i * y^j where i+j <= order
  */
-class MonomialBasisTriangle : public OrthogonalBasis {
+class MonomialBasisTriangle : public OrthogonalBasisCRTP<MonomialBasisTriangle> {
 public:
     explicit MonomialBasisTriangle(int order);
 
-    Eigen::VectorXd evaluate(const Eigen::Vector2d& xi) const override;
-    Eigen::MatrixXd evaluate_gradient(const Eigen::Vector2d& xi) const override;
+    DView1 evaluate_impl(const Vec2& xi) const;
+    DView2 evaluate_gradient_impl(const Vec2& xi) const;
 
-protected:
-    int compute_n_basis() const override;
+    // Public (see DubinerBasis for the same note) since the CRTP base dispatches to
+    // this via static_cast on a Derived*, which requires public access.
+    int compute_n_basis_impl() const;
 
 private:
     /**

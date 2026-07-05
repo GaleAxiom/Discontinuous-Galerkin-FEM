@@ -21,11 +21,13 @@ std::unique_ptr<QuadratureRule> QuadratureFactory::gauss_legendre_1d(int n_point
         throw std::invalid_argument(oss.str());
     }
 
-    Eigen::VectorXd points, weights;
+    DView1 points, weights;
     compute_gauss_legendre(n_points, points, weights);
 
-    Eigen::MatrixXd pts(n_points, 1);
-    pts.col(0) = std::move(points);
+    DView2 pts("gl_1d_points", n_points, 1);
+    for (int i = 0; i < n_points; ++i) {
+        pts(i, 0) = points[i];
+    }
 
     return std::make_unique<QuadratureRule>(std::move(pts), std::move(weights));
 }
@@ -38,12 +40,12 @@ std::unique_ptr<QuadratureRule> QuadratureFactory::gauss_legendre_quad(int n_poi
         throw std::invalid_argument(oss.str());
     }
 
-    Eigen::VectorXd points_1d, weights_1d;
+    DView1 points_1d, weights_1d;
     compute_gauss_legendre(n_points_1d, points_1d, weights_1d);
 
     const int total_points = n_points_1d * n_points_1d;
-    Eigen::MatrixXd points(total_points, 2);
-    Eigen::VectorXd weights(total_points);
+    DView2 points("gl_quad_points", total_points, 2);
+    DView1 weights("gl_quad_weights", total_points);
 
     int idx = 0;
     for (int j = 0; j < n_points_1d; ++j) {
@@ -66,16 +68,15 @@ std::unique_ptr<QuadratureRule> QuadratureFactory::dunavant_triangle(int order) 
         throw std::invalid_argument(oss.str());
     }
 
-    Eigen::MatrixXd points;
-    Eigen::VectorXd weights;
+    DView2 points;
+    DView1 weights;
     get_dunavant_rule(order, points, weights);
     return std::make_unique<QuadratureRule>(std::move(points), std::move(weights));
 }
 
-void QuadratureFactory::compute_gauss_legendre(int n, Eigen::VectorXd& points,
-                                               Eigen::VectorXd& weights) {
-    points.resize(n);
-    weights.resize(n);
+void QuadratureFactory::compute_gauss_legendre(int n, DView1& points, DView1& weights) {
+    points = DView1("gl_points", n);
+    weights = DView1("gl_weights", n);
 
     // Use compile-time constants where possible
     constexpr double sqrt_3_inv =
@@ -235,8 +236,7 @@ void QuadratureFactory::compute_gauss_legendre(int n, Eigen::VectorXd& points,
     }
 }
 
-void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
-                                          Eigen::VectorXd& weights) {
+void QuadratureFactory::get_dunavant_rule(int order, DView2& points, DView1& weights) {
     // Intrepid2 cubature rules for triangles
     // Reference triangle: {(0,0), (1,0), (0,1)}
     // Data from: Intrepid2_CubatureDirectTriDefaultDef.hpp
@@ -248,8 +248,8 @@ void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
     case 0:
     case 1: {
         // 1-point rule (degree 1)
-        points.resize(1, 2);
-        weights.resize(1);
+        points = DView2("dunavant_points", 1, 2);
+        weights = DView1("dunavant_weights", 1);
         points(0, 0) = one_third;
         points(0, 1) = one_third;
         weights[0] = one_half;
@@ -258,8 +258,8 @@ void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
 
     case 2: {
         // 3-point rule (degree 2)
-        points.resize(3, 2);
-        weights.resize(3);
+        points = DView2("dunavant_points", 3, 2);
+        weights = DView1("dunavant_weights", 3);
         points(0, 0) = 1.0 / 6.0;
         points(0, 1) = 1.0 / 6.0;
         points(1, 0) = 1.0 / 6.0;
@@ -272,8 +272,8 @@ void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
 
     case 3: {
         // 4-point rule (degree 3)
-        points.resize(4, 2);
-        weights.resize(4);
+        points = DView2("dunavant_points", 4, 2);
+        weights = DView1("dunavant_weights", 4);
         points(0, 0) = one_third;
         points(0, 1) = one_third;
         points(1, 0) = 0.2;
@@ -292,8 +292,8 @@ void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
 
     case 4: {
         // 6-point rule (degree 4)
-        points.resize(6, 2);
-        weights.resize(6);
+        points = DView2("dunavant_points", 6, 2);
+        weights = DView1("dunavant_weights", 6);
 
         points(0, 0) = 4.4594849091596487577332043252695176084800e-1;
         points(0, 1) = 4.4594849091596487577332043252695176084800e-1;
@@ -319,8 +319,8 @@ void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
 
     case 5: {
         // 7-point rule (degree 5)
-        points.resize(7, 2);
-        weights.resize(7);
+        points = DView2("dunavant_points", 7, 2);
+        weights = DView1("dunavant_weights", 7);
 
         points(0, 0) = 3.3333333333333333333333333333333333333333e-1;
         points(0, 1) = 3.3333333333333333333333333333333333333333e-1;
@@ -349,8 +349,8 @@ void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
 
     case 6: {
         // 12-point rule (degree 6)
-        points.resize(12, 2);
-        weights.resize(12);
+        points = DView2("dunavant_points", 12, 2);
+        weights = DView1("dunavant_weights", 12);
 
         points(0, 0) = 6.3089014491502228340331602870819157341003e-2;
         points(0, 1) = 6.3089014491502228340331602870819157341003e-2;
@@ -394,8 +394,8 @@ void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
 
     case 7: {
         // 13-point rule (degree 7)
-        points.resize(13, 2);
-        weights.resize(13);
+        points = DView2("dunavant_points", 13, 2);
+        weights = DView1("dunavant_weights", 13);
 
         points(0, 0) = 3.33333333333333e-1;
         points(0, 1) = 3.33333333333333e-1;
@@ -442,8 +442,8 @@ void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
 
     case 8: {
         // 16-point rule (degree 8)
-        points.resize(16, 2);
-        weights.resize(16);
+        points = DView2("dunavant_points", 16, 2);
+        weights = DView1("dunavant_weights", 16);
 
         points(0, 0) = 3.33333333333333e-1;
         points(0, 1) = 3.33333333333333e-1;
@@ -500,8 +500,8 @@ void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
     case 9:
     case 10: {
         // 19-point rule (degree 9)
-        points.resize(19, 2);
-        weights.resize(19);
+        points = DView2("dunavant_points", 19, 2);
+        weights = DView1("dunavant_weights", 19);
 
         points(0, 0) = 3.33333333333333e-1;
         points(0, 1) = 3.33333333333333e-1;
@@ -567,8 +567,8 @@ void QuadratureFactory::get_dunavant_rule(int order, Eigen::MatrixXd& points,
     case 11:
     case 12: {
         // 42-point rule (degree 14) from Intrepid2
-        points.resize(42, 2);
-        weights.resize(42);
+        points = DView2("dunavant_points", 42, 2);
+        weights = DView1("dunavant_weights", 42);
 
         points(0, 0) = 4.88963910362179e-1;
         points(0, 1) = 4.88963910362179e-1;

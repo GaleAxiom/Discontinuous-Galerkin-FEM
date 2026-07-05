@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <Eigen/Dense>
+#include "dgfem/kokkos_math.hpp"
 
 #include <functional>
 #include <memory>
@@ -37,10 +37,9 @@ enum class BCTypeEuler {
 class BoundaryCondition {
 public:
     BoundaryCondition(BCType type, double value);
-    BoundaryCondition(BCType type, std::function<double(const Eigen::Vector2d&)> func);
+    BoundaryCondition(BCType type, std::function<double(const Vec2&)> func);
     BoundaryCondition(BCType type, double value, double robin_alpha);
-    BoundaryCondition(BCType type, std::function<double(const Eigen::Vector2d&)> func,
-                      double robin_alpha);
+    BoundaryCondition(BCType type, std::function<double(const Vec2&)> func, double robin_alpha);
 
     virtual ~BoundaryCondition() = default;
 
@@ -55,7 +54,7 @@ public:
     /**
      * @brief Evaluate boundary condition at point x
      */
-    [[nodiscard]] double evaluate(const Eigen::Vector2d& x) const;
+    [[nodiscard]] double evaluate(const Vec2& x) const;
 
     [[nodiscard]] BCType get_type() const noexcept { return type_; }
     [[nodiscard]] double get_robin_alpha() const noexcept { return robin_alpha_; }
@@ -64,7 +63,7 @@ public:
 private:
     BCType type_;
     double constant_value_;
-    std::function<double(const Eigen::Vector2d&)> function_value_;
+    std::function<double(const Vec2&)> function_value_;
     bool is_function_;
     double robin_alpha_;
 };
@@ -74,9 +73,8 @@ private:
  */
 class BoundaryConditionEuler {
 public:
-    BoundaryConditionEuler(BCTypeEuler type, const Eigen::Vector4d& value);
-    BoundaryConditionEuler(BCTypeEuler type,
-                           std::function<Eigen::Vector4d(const Eigen::Vector2d&)> func);
+    BoundaryConditionEuler(BCTypeEuler type, const Vec4& value);
+    BoundaryConditionEuler(BCTypeEuler type, std::function<Vec4(const Vec2&)> func);
 
     virtual ~BoundaryConditionEuler() = default;
 
@@ -91,26 +89,26 @@ public:
     /**
      * @brief Evaluate boundary condition at point x
      */
-    [[nodiscard]] Eigen::Vector4d evaluate(const Eigen::Vector2d& x) const;
+    [[nodiscard]] Vec4 evaluate(const Vec2& x) const;
 
     [[nodiscard]] BCTypeEuler get_type() const noexcept { return type_; }
 
 private:
     BCTypeEuler type_;
-    Eigen::Vector4d constant_value_;
-    std::function<Eigen::Vector4d(const Eigen::Vector2d&)> function_value_;
+    Vec4 constant_value_;
+    std::function<Vec4(const Vec2&)> function_value_;
     bool is_function_;
 };
 
 // Convenience factory functions
 [[nodiscard]] std::shared_ptr<BoundaryCondition> make_dirichlet_bc(double value);
 [[nodiscard]] std::shared_ptr<BoundaryCondition>
-make_dirichlet_bc(std::function<double(const Eigen::Vector2d&)> func);
+make_dirichlet_bc(std::function<double(const Vec2&)> func);
 [[nodiscard]] std::shared_ptr<BoundaryCondition> make_neumann_bc(double value);
 [[nodiscard]] std::shared_ptr<BoundaryCondition>
-make_neumann_bc(std::function<double(const Eigen::Vector2d&)> func);
+make_neumann_bc(std::function<double(const Vec2&)> func);
 [[nodiscard]] std::shared_ptr<BoundaryCondition> make_robin_bc(double value, double alpha);
 [[nodiscard]] std::shared_ptr<BoundaryCondition>
-make_robin_bc(std::function<double(const Eigen::Vector2d&)> func, double alpha);
+make_robin_bc(std::function<double(const Vec2&)> func, double alpha);
 
 }  // namespace dgfem

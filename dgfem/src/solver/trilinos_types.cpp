@@ -8,8 +8,8 @@ Teuchos::RCP<const TpetraMap> make_serial_map(TpetraGlobalOrdinal n_dofs) {
     return Teuchos::rcp(new TpetraMap(n_dofs, 0, Tpetra::getDefaultComm()));
 }
 
-Teuchos::RCP<TpetraMultiVector> eigen_to_tpetra(const Eigen::VectorXd& v,
-                                                const Teuchos::RCP<const TpetraMap>& map) {
+Teuchos::RCP<TpetraMultiVector> view_to_tpetra(const DView1& v,
+                                               const Teuchos::RCP<const TpetraMap>& map) {
     auto result = Teuchos::rcp(new TpetraMultiVector(map, 1));
     auto view = result->getLocalViewHost(Tpetra::Access::OverwriteAll);
     for (TpetraLocalOrdinal i = 0; i < static_cast<TpetraLocalOrdinal>(map->getLocalNumElements());
@@ -19,8 +19,8 @@ Teuchos::RCP<TpetraMultiVector> eigen_to_tpetra(const Eigen::VectorXd& v,
     return result;
 }
 
-Eigen::MatrixXd tpetra_to_dense(const TpetraCrsMatrix& m) {
-    Eigen::MatrixXd dense = Eigen::MatrixXd::Zero(m.getGlobalNumRows(), m.getGlobalNumCols());
+DView2 tpetra_to_dense(const TpetraCrsMatrix& m) {
+    DView2 dense("dense", m.getGlobalNumRows(), m.getGlobalNumCols());
     auto row_map = m.getRowMap();
     for (TpetraLocalOrdinal local_row = 0;
          local_row < static_cast<TpetraLocalOrdinal>(row_map->getLocalNumElements()); ++local_row) {
@@ -37,9 +37,9 @@ Eigen::MatrixXd tpetra_to_dense(const TpetraCrsMatrix& m) {
     return dense;
 }
 
-Eigen::VectorXd tpetra_to_eigen(const TpetraMultiVector& v) {
+DView1 tpetra_to_view(const TpetraMultiVector& v) {
     auto map = v.getMap();
-    Eigen::VectorXd result(v.getGlobalLength());
+    DView1 result("tpetra_to_view", v.getGlobalLength());
     auto view = v.getLocalViewHost(Tpetra::Access::ReadOnly);
     for (TpetraLocalOrdinal i = 0; i < static_cast<TpetraLocalOrdinal>(map->getLocalNumElements());
          ++i) {

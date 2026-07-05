@@ -12,15 +12,28 @@
 
 namespace dgfem {
 
-ReferenceElement::ReferenceElement(const Eigen::MatrixXd& vertices)
-    : vertices_(vertices), dim_(vertices.cols()), n_vertices_(vertices.rows()) {}
+namespace {
+DView2 make_vertices(std::initializer_list<std::array<double, 2>> rows) {
+    DView2 v("ref_vertices", rows.size(), 2);
+    int i = 0;
+    for (const auto& row : rows) {
+        v(i, 0) = row[0];
+        v(i, 1) = row[1];
+        ++i;
+    }
+    return v;
+}
+}  // namespace
+
+ReferenceElement::ReferenceElement(const DView2& vertices)
+    : vertices_(vertices), dim_(vertices.extent(1)), n_vertices_(vertices.extent(0)) {}
 
 ReferenceTriangle::ReferenceTriangle()
-    : ReferenceElement((Eigen::MatrixXd(3, 2) << 0.0, 0.0, 1.0, 0.0, 0.0, 1.0).finished()) {
+    : ReferenceElement(make_vertices({{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}})) {
     n_edges_ = 3;
 }
 
-bool ReferenceTriangle::contains_point(const Eigen::Vector2d& xi) const {
+bool ReferenceTriangle::contains_point(const Vec2& xi) const {
     return xi[0] >= 0 && xi[1] >= 0 && (xi[0] + xi[1]) <= 1;
 }
 
@@ -37,11 +50,10 @@ std::pair<int, int> ReferenceTriangle::edge_vertices(int edge_id) const {
     }
 }
 
-void ReferenceTriangle::compute_shape_functions(const Eigen::Vector2d& xi, Eigen::VectorXd& N,
-                                                Eigen::MatrixXd& dN_dxi) const {
+void ReferenceTriangle::compute_shape_functions(const Vec2& xi, DView1& N, DView2& dN_dxi) const {
     // Triangle shape functions: N1 = 1-xi-eta, N2 = xi, N3 = eta
-    N.resize(3);
-    dN_dxi.resize(3, 2);
+    N = DView1("N", 3);
+    dN_dxi = DView2("dN_dxi", 3, 2);
 
     N[0] = 1.0 - xi[0] - xi[1];
     N[1] = xi[0];
@@ -55,18 +67,17 @@ void ReferenceTriangle::compute_shape_functions(const Eigen::Vector2d& xi, Eigen
     dN_dxi(2, 1) = 1.0;
 }
 
-void ReferenceTriangle::project_to_bounds(Eigen::Vector2d& xi) const {
+void ReferenceTriangle::project_to_bounds(Vec2& xi) const {
     xi[0] = std::max(0.0, std::min(1.0, xi[0]));
     xi[1] = std::max(0.0, std::min(1.0 - xi[0], xi[1]));
 }
 
 ReferenceQuad::ReferenceQuad()
-    : ReferenceElement(
-          (Eigen::MatrixXd(4, 2) << -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0).finished()) {
+    : ReferenceElement(make_vertices({{-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {-1.0, 1.0}})) {
     n_edges_ = 4;
 }
 
-bool ReferenceQuad::contains_point(const Eigen::Vector2d& xi) const {
+bool ReferenceQuad::contains_point(const Vec2& xi) const {
     return std::abs(xi[0]) <= 1.0 && std::abs(xi[1]) <= 1.0;
 }
 
@@ -89,11 +100,10 @@ std::pair<int, int> ReferenceQuad::edge_vertices(int edge_id) const {
     }
 }
 
-void ReferenceQuad::compute_shape_functions(const Eigen::Vector2d& xi, Eigen::VectorXd& N,
-                                            Eigen::MatrixXd& dN_dxi) const {
+void ReferenceQuad::compute_shape_functions(const Vec2& xi, DView1& N, DView2& dN_dxi) const {
     // Bilinear shape functions for quad
-    N.resize(4);
-    dN_dxi.resize(4, 2);
+    N = DView1("N", 4);
+    dN_dxi = DView2("dN_dxi", 4, 2);
 
     N[0] = 0.25 * (1.0 - xi[0]) * (1.0 - xi[1]);
     N[1] = 0.25 * (1.0 + xi[0]) * (1.0 - xi[1]);
@@ -110,7 +120,7 @@ void ReferenceQuad::compute_shape_functions(const Eigen::Vector2d& xi, Eigen::Ve
     dN_dxi(3, 1) = 0.25 * (1.0 - xi[0]);
 }
 
-void ReferenceQuad::project_to_bounds(Eigen::Vector2d& xi) const {
+void ReferenceQuad::project_to_bounds(Vec2& xi) const {
     xi[0] = std::max(-1.0, std::min(1.0, xi[0]));
     xi[1] = std::max(-1.0, std::min(1.0, xi[1]));
 }

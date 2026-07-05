@@ -16,16 +16,16 @@
 namespace dgfem {
 
 LegendreBasis::LegendreBasis(int order)
-    : OrthogonalBasis(std::make_shared<ReferenceQuad>(), order) {
+    : OrthogonalBasisCRTP<LegendreBasis>(std::make_shared<ReferenceQuad>(), order) {
     if (order > MAX_ORDER) {
         std::ostringstream oss;
         oss << "Legendre basis for order " << order << " not supported (max: " << MAX_ORDER << ")";
         throw std::invalid_argument(oss.str());
     }
-    n_basis_ = compute_n_basis();
+    n_basis_ = compute_n_basis_impl();
 }
 
-int LegendreBasis::compute_n_basis() const {
+int LegendreBasis::compute_n_basis_impl() const {
     return n_basis_for_order(order_);
 }
 
@@ -66,8 +66,8 @@ void LegendreBasis::evaluate_legendre_sequence(int max_n, double x, double* resu
     }
 }
 
-Eigen::VectorXd LegendreBasis::evaluate(const Eigen::Vector2d& xi) const {
-    Eigen::VectorXd phi(n_basis_);
+DView1 LegendreBasis::evaluate_impl(const Vec2& xi) const {
+    DView1 phi("legendre_phi", n_basis_);
 
     // Preallocate for vectorized computation
     std::array<double, MAX_ORDER + 1> P_x, P_y;
@@ -85,8 +85,8 @@ Eigen::VectorXd LegendreBasis::evaluate(const Eigen::Vector2d& xi) const {
     return phi;
 }
 
-Eigen::MatrixXd LegendreBasis::evaluate_gradient(const Eigen::Vector2d& xi) const {
-    Eigen::MatrixXd grad(n_basis_, 2);
+DView2 LegendreBasis::evaluate_gradient_impl(const Vec2& xi) const {
+    DView2 grad("legendre_grad", n_basis_, 2);
 
     // Precompute polynomial values and derivatives
     std::array<double, MAX_ORDER + 1> P_x, P_y, dP_x, dP_y;

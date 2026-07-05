@@ -37,7 +37,7 @@ A high-performance C++20 implementation of the Discontinuous Galerkin Finite Ele
 
 - **C++20** compatible compiler (GCC 10+, Clang 12+, MSVC 2019+)
 - **CMake** 3.12 or higher
-- **Eigen3** (bundled in `external/eigen` or system-installed)
+- **Trilinos** (built from source; see `TRILINOS.md` for the recipe)
 - **GMSH** library and headers
 - **Google Test** (for testing)
 
@@ -152,7 +152,6 @@ Discontinuous-Galerkin-FEM/
 │   ├── src/                    # Implementation files
 │   ├── tests/                  # Unit tests
 │   └── examples/               # Example programs
-├── external/eigen/             # Eigen linear algebra library
 ├── output/                     # VTK output files
 ├── Dockerfile                  # Docker container setup
 ├── build-docker.sh             # Docker build script
@@ -171,8 +170,8 @@ cmake -B build -S dgfem -DBUILD_TESTS=ON
 # Debug build with sanitizers
 cmake -B build -S dgfem -DCMAKE_BUILD_TYPE=Debug
 
-# Use system Eigen3 instead of bundled
-cmake -B build -S dgfem -DEigen3_DIR=/path/to/eigen3
+# Point CMake at a non-default Trilinos install prefix
+cmake -B build -S dgfem -DCMAKE_PREFIX_PATH=/path/to/trilinos-install
 ```
 
 ## 🔬 Theory & Method
@@ -234,6 +233,6 @@ This project is developed for academic and research purposes.
 
 ## 🙏 Acknowledgments
 
-- **Eigen** - High-performance linear algebra library
+- **Trilinos** - High-performance linear algebra and solver library
 - **GMSH** - Mesh generation and processing
 - **Google Test** - C++ testing framework

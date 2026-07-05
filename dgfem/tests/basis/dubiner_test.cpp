@@ -1,6 +1,6 @@
-#include <Eigen/Dense>
 #include <cmath>
 #include <dgfem/basis/dubiner.hpp>
+#include <dgfem/kokkos_math.hpp>
 #include <dgfem/quadrature/factory.hpp>
 #include <dgfem/reference/elements.hpp>
 
@@ -36,39 +36,39 @@ TEST(DubinerBasisTest, EvaluateAtVertex) {
     // Reference triangle: (0,0), (1,0), (0,1)
 
     // Test at origin (0, 0)
-    Eigen::Vector2d vertex1(0.0, 0.0);
-    Eigen::VectorXd values1 = basis.evaluate(vertex1);
+    Vec2 vertex1{0.0, 0.0};
+    DView1 values1 = basis.evaluate(vertex1);
     EXPECT_EQ(values1.size(), 6);  // (2+1)(2+2)/2 = 6
-    EXPECT_TRUE(values1.allFinite());
+    EXPECT_TRUE(all_finite(values1));
 
     // First basis function should be non-zero at all points (it's constant-like)
     EXPECT_NE(values1(0), 0.0);
 
     // Test at (1, 0)
-    Eigen::Vector2d vertex2(1.0, 0.0);
-    Eigen::VectorXd values2 = basis.evaluate(vertex2);
+    Vec2 vertex2{1.0, 0.0};
+    DView1 values2 = basis.evaluate(vertex2);
     EXPECT_EQ(values2.size(), 6);
-    EXPECT_TRUE(values2.allFinite());
+    EXPECT_TRUE(all_finite(values2));
 
     // Test at (0, 1) - the singular point in collapsed coordinates
-    Eigen::Vector2d vertex3(0.0, 1.0);
-    Eigen::VectorXd values3 = basis.evaluate(vertex3);
+    Vec2 vertex3{0.0, 1.0};
+    DView1 values3 = basis.evaluate(vertex3);
     EXPECT_EQ(values3.size(), 6);
-    EXPECT_TRUE(values3.allFinite());  // Critical: must handle singularity
+    EXPECT_TRUE(all_finite(values3));  // Critical: must handle singularity
 }
 
 TEST(DubinerBasisTest, EvaluateGradientAtOrigin) {
     DubinerBasis basis(1);  // Test with linear basis
-    Eigen::Vector2d origin(0.0, 0.0);
+    Vec2 origin{0.0, 0.0};
 
-    Eigen::MatrixXd gradient = basis.evaluate_gradient(origin);
+    DView2 gradient = basis.evaluate_gradient(origin);
 
     // Size should be 3x2 for linear basis on triangle
-    EXPECT_EQ(gradient.rows(), 3);
-    EXPECT_EQ(gradient.cols(), 2);
+    EXPECT_EQ(gradient.extent(0), 3);
+    EXPECT_EQ(gradient.extent(1), 2);
 
     // All values should be finite
-    EXPECT_TRUE(gradient.allFinite());
+    EXPECT_TRUE(all_finite(gradient));
 
     // For linear basis on triangle, gradients should be constant
     // First basis function (constant) should have zero gradient
@@ -89,15 +89,15 @@ TEST(DubinerBasisTest, SingularityHandling) {
     DubinerBasis basis(2);
 
     // Test at top vertex (0, 1) where collapsed coordinates are singular
-    Eigen::Vector2d top_vertex(0.0, 1.0);
+    Vec2 top_vertex{0.0, 1.0};
 
     // Should not throw and produce finite values
     EXPECT_NO_THROW({
-        Eigen::VectorXd values = basis.evaluate(top_vertex);
-        EXPECT_TRUE(values.allFinite());
+        DView1 values = basis.evaluate(top_vertex);
+        EXPECT_TRUE(all_finite(values));
 
-        Eigen::MatrixXd gradient = basis.evaluate_gradient(top_vertex);
-        EXPECT_TRUE(gradient.allFinite());
+        DView2 gradient = basis.evaluate_gradient(top_vertex);
+        EXPECT_TRUE(all_finite(gradient));
     });
 }
 
@@ -110,16 +110,15 @@ TEST(DubinerBasisTest, NormalizationFactors) {
 
     // Here we just verify that evaluations and gradients produce
     // reasonable values at a few points
-    std::vector<Eigen::Vector2d> test_points = {
-        Eigen::Vector2d(-0.5, -0.5), Eigen::Vector2d(0.0, 0.0), Eigen::Vector2d(0.5, 0.0)};
+    std::vector<Vec2> test_points = {Vec2{-0.5, -0.5}, Vec2{0.0, 0.0}, Vec2{0.5, 0.0}};
 
     for (const auto& point : test_points) {
-        Eigen::VectorXd values = basis.evaluate(point);
-        Eigen::MatrixXd gradient = basis.evaluate_gradient(point);
+        DView1 values = basis.evaluate(point);
+        DView2 gradient = basis.evaluate_gradient(point);
 
         // Values and gradients should be finite
-        EXPECT_TRUE(values.allFinite());
-        EXPECT_TRUE(gradient.allFinite());
+        EXPECT_TRUE(all_finite(values));
+        EXPECT_TRUE(all_finite(gradient));
 
         // Values should be of reasonable magnitude due to normalization
         for (int i = 0; i < values.size(); ++i) {
@@ -139,13 +138,13 @@ TEST(DubinerBasisTest, OrthonormalityVerification) {
     int n_basis = basis.get_n_basis();  // Should be 6 for order 2
 
     // Compute Gram matrix: G_ij = ∫∫ φᵢ(x,y) φⱼ(x,y) dA
-    Eigen::MatrixXd gram_matrix = Eigen::MatrixXd::Zero(n_basis, n_basis);
+    DView2 gram_matrix = DView2("tmp", n_basis, n_basis);
 
     for (int q = 0; q < quad->size(); ++q) {
-        Eigen::Vector2d qp = quad->points.row(q);
+        Vec2 qp = row2(quad->points, q);
         double w = quad->weights(q);
 
-        Eigen::VectorXd phi = basis.evaluate(qp);
+        DView1 phi = basis.evaluate(qp);
 
         // Add contribution: w * φᵢ * φⱼ
         for (int i = 0; i < n_basis; ++i) {
@@ -156,7 +155,11 @@ TEST(DubinerBasisTest, OrthonormalityVerification) {
     }
 
     // Reference triangle area is 0.5
-    gram_matrix *= 0.5;
+    for (int i = 0; i < n_basis; ++i) {
+        for (int j = 0; j < n_basis; ++j) {
+            gram_matrix(i, j) *= 0.5;
+        }
+    }
 
     // Verify orthonormality: G should be identity matrix
     // ∫∫ φᵢ φⱼ dA = δᵢⱼ (Kronecker delta)
@@ -180,38 +183,39 @@ TEST(DubinerBasisTest, PolynomialCompleteness) {
     DubinerBasis basis(2);  // Should be able to represent all polynomials up to degree 2
 
     // Test polynomial: p(x,y) = 1 + 2x + 3y + x² + xy + y²
-    auto test_poly = [](const Eigen::Vector2d& p) {
-        return 1.0 + 2.0 * p(0) + 3.0 * p(1) + p(0) * p(0) + p(0) * p(1) + p(1) * p(1);
+    auto test_poly = [](const Vec2& p) {
+        return 1.0 + 2.0 * p[0] + 3.0 * p[1] + p[0] * p[0] + p[0] * p[1] + p[1] * p[1];
     };
 
     // Use quadrature to find coefficients: cᵢ = ∫∫ p(x,y) φᵢ(x,y) dA
     auto quad = QuadratureFactory::dunavant_triangle(5);
     int n_basis = basis.get_n_basis();
-    Eigen::VectorXd coeffs = Eigen::VectorXd::Zero(n_basis);
+    DView1 coeffs = DView1("tmp", n_basis);
 
     for (int q = 0; q < quad->size(); ++q) {
-        Eigen::Vector2d qp = quad->points.row(q);
+        Vec2 qp = row2(quad->points, q);
         double w = quad->weights(q);
         double poly_val = test_poly(qp);
-        Eigen::VectorXd phi = basis.evaluate(qp);
+        DView1 phi = basis.evaluate(qp);
 
         for (int i = 0; i < n_basis; ++i) {
             coeffs(i) += w * poly_val * phi(i);
         }
     }
-    coeffs *= 0.5;  // Triangle area
+    for (int i = 0; i < n_basis; ++i) {
+        coeffs(i) *= 0.5;  // Triangle area
+    }
 
     // Now verify: ∑ cᵢφᵢ(x,y) ≈ p(x,y) at test points
-    std::vector<Eigen::Vector2d> test_points = {
-        Eigen::Vector2d(0.2, 0.3), Eigen::Vector2d(0.5, 0.2), Eigen::Vector2d(0.1, 0.6)};
+    std::vector<Vec2> test_points = {Vec2{0.2, 0.3}, Vec2{0.5, 0.2}, Vec2{0.1, 0.6}};
 
     for (const auto& pt : test_points) {
         double exact = test_poly(pt);
-        Eigen::VectorXd phi = basis.evaluate(pt);
-        double approx = coeffs.dot(phi);
+        DView1 phi = basis.evaluate(pt);
+        double approx = dot(coeffs, phi);
 
         EXPECT_NEAR(approx, exact, 1e-10)
-            << "Polynomial not accurately represented at (" << pt(0) << ", " << pt(1) << ")";
+            << "Polynomial not accurately represented at (" << pt[0] << ", " << pt[1] << ")";
     }
 }
 
@@ -219,27 +223,27 @@ TEST(DubinerBasisTest, PolynomialCompleteness) {
 TEST(DubinerBasisTest, NumericalGradientVerification) {
     DubinerBasis basis(2);
 
-    Eigen::Vector2d test_point(0.3, 0.4);
+    Vec2 test_point{0.3, 0.4};
     double h = 1e-7;  // Finite difference step
 
     // Analytical gradient
-    Eigen::MatrixXd grad_analytical = basis.evaluate_gradient(test_point);
+    DView2 grad_analytical = basis.evaluate_gradient(test_point);
 
     // Numerical gradient via finite differences
     int n_basis = basis.get_n_basis();
-    Eigen::MatrixXd grad_numerical(n_basis, 2);
+    DView2 grad_numerical("grad_numerical", n_basis, 2);
 
     for (int i = 0; i < n_basis; ++i) {
         // x-derivative
-        Eigen::Vector2d pt_plus_x = test_point + Eigen::Vector2d(h, 0);
-        Eigen::Vector2d pt_minus_x = test_point - Eigen::Vector2d(h, 0);
+        Vec2 pt_plus_x = test_point + Vec2{h, 0};
+        Vec2 pt_minus_x = test_point - Vec2{h, 0};
         double val_plus_x = basis.evaluate(pt_plus_x)(i);
         double val_minus_x = basis.evaluate(pt_minus_x)(i);
         grad_numerical(i, 0) = (val_plus_x - val_minus_x) / (2 * h);
 
         // y-derivative
-        Eigen::Vector2d pt_plus_y = test_point + Eigen::Vector2d(0, h);
-        Eigen::Vector2d pt_minus_y = test_point - Eigen::Vector2d(0, h);
+        Vec2 pt_plus_y = test_point + Vec2{0, h};
+        Vec2 pt_minus_y = test_point - Vec2{0, h};
         double val_plus_y = basis.evaluate(pt_plus_y)(i);
         double val_minus_y = basis.evaluate(pt_minus_y)(i);
         grad_numerical(i, 1) = (val_plus_y - val_minus_y) / (2 * h);

@@ -3,10 +3,10 @@
  * @brief Tests for time-dependent DG solvers
  */
 
-#include <Eigen/Dense>
 #include <cmath>
 #include <dgfem/boundary/conditions.hpp>
 #include <dgfem/core/space.hpp>
+#include <dgfem/kokkos_math.hpp>
 #include <dgfem/solver/dg_solver.hpp>
 #include <dgfem/utils/mesh_creation.hpp>
 
@@ -33,10 +33,10 @@ TEST_F(TimeDependentSolverTest, AdvectionTimeSteppingStability) {
     mesh->initialize_dg_space(dg_space, 1);
 
     // Velocity field
-    Eigen::Vector2d velocity(1.0, 0.0);
+    Vec2 velocity{1.0, 0.0};
 
     // Initial condition: Gaussian pulse
-    auto initial_condition = [](const Eigen::Vector2d& x) -> double {
+    auto initial_condition = [](const Vec2& x) -> double {
         double x0 = 0.5, y0 = 0.5;
         double sigma = 0.1;
         return std::exp(-((x[0] - x0) * (x[0] - x0) + (x[1] - y0) * (x[1] - y0)) /
@@ -45,7 +45,7 @@ TEST_F(TimeDependentSolverTest, AdvectionTimeSteppingStability) {
 
     // Set up initial solution by L2 projection
     int n_dofs = mesh->get_n_elements() * dg_space->get_basis()->get_n_basis();
-    Eigen::VectorXd u_n = Eigen::VectorXd::Zero(n_dofs);
+    DView1 u_n = DView1("u_n", n_dofs);
 
     // Simple initialization - set first DOF of each element to 1
     for (int elem_id = 0; elem_id < mesh->get_n_elements(); ++elem_id) {
@@ -55,7 +55,7 @@ TEST_F(TimeDependentSolverTest, AdvectionTimeSteppingStability) {
 
     // Time stepping parameters
     double dx = h;
-    double v_max = velocity.norm();
+    double v_max = norm(velocity);
     double CFL = 0.5;
     double dt = CFL * dx / v_max;  // CFL condition
     double T_final = 0.5;
@@ -69,7 +69,7 @@ TEST_F(TimeDependentSolverTest, AdvectionTimeSteppingStability) {
     // Would need advection operator assembly here
 
     // For now, just test that solution remains bounded
-    double initial_norm = u_n.norm();
+    double initial_norm = norm(u_n);
     EXPECT_GT(initial_norm, 0.0) << "Initial condition should be non-zero";
 
     // Forward Euler time stepping (simple test)
@@ -78,7 +78,7 @@ TEST_F(TimeDependentSolverTest, AdvectionTimeSteppingStability) {
         // (simplified - actual implementation would use proper time integrator)
 
         // For stability test, just check solution doesn't blow up
-        double current_norm = u_n.norm();
+        double current_norm = norm(u_n);
         EXPECT_TRUE(std::isfinite(current_norm)) << "Solution should remain finite at step " << n;
         EXPECT_LT(current_norm, 10.0 * initial_norm)
             << "Solution shouldn't grow unbounded at step " << n;
@@ -97,12 +97,12 @@ TEST_F(TimeDependentSolverTest, HeatEquationTimeAccuracy) {
     const double pi = M_PI;
 
     // Manufactured solution: u(x,y,t) = exp(-2π²νt)sin(πx)sin(πy)
-    auto exact_solution = [pi, nu](const Eigen::Vector2d& x, double t) -> double {
+    auto exact_solution = [pi, nu](const Vec2& x, double t) -> double {
         return std::exp(-2 * pi * pi * nu * t) * std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
     // Initial condition (t=0)
-    auto initial = [pi](const Eigen::Vector2d& x) -> double {
+    auto initial = [pi](const Vec2& x) -> double {
         return std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
@@ -120,7 +120,7 @@ TEST_F(TimeDependentSolverTest, HeatEquationTimeAccuracy) {
 
     // Initialize solution
     int n_dofs = mesh->get_n_elements() * dg_space->get_basis()->get_n_basis();
-    Eigen::VectorXd u_n = Eigen::VectorXd::Zero(n_dofs);
+    DView1 u_n = DView1("u_n", n_dofs);
 
     // Simple initialization for testing
     for (int elem_id = 0; elem_id < mesh->get_n_elements(); ++elem_id) {
@@ -133,7 +133,7 @@ TEST_F(TimeDependentSolverTest, HeatEquationTimeAccuracy) {
     // Would use this to get system matrix for implicit time stepping
 
     // For now, test that solution decays as expected
-    double initial_norm = u_n.norm();
+    double initial_norm = norm(u_n);
     double expected_decay = std::exp(-2 * pi * pi * nu * T_final);
 
     EXPECT_GT(initial_norm, 0.0) << "Initial condition should be non-zero";
@@ -212,10 +212,10 @@ TEST_F(TimeDependentSolverTest, CFLConditionViolation) {
     // Test that violating CFL condition leads to instability (for explicit methods)
 
     double h = 0.1;
-    Eigen::Vector2d velocity(1.0, 0.0);
+    Vec2 velocity{1.0, 0.0};
 
     // Violate CFL: use dt > h/|v|
-    double v_max = velocity.norm();
+    double v_max = norm(velocity);
     double dt_stable = h / v_max;
     double dt_unstable = 2.0 * dt_stable;  // Violate CFL by factor of 2
 
@@ -240,20 +240,24 @@ TEST_F(TimeDependentSolverTest, MassConservation) {
     mesh->initialize_dg_space(dg_space, 1);
 
     // Divergence-free velocity (should conserve mass)
-    Eigen::Vector2d velocity(1.0, 0.0);
+    Vec2 velocity{1.0, 0.0};
 
     int n_dofs = mesh->get_n_elements() * dg_space->get_basis()->get_n_basis();
-    Eigen::VectorXd u(n_dofs);
-    u.setOnes();  // Uniform initial condition
+    DView1 u("u", n_dofs);
+    for (int i = 0; i < n_dofs; ++i)
+        u(i) = 1.0;  // Uniform initial condition
 
     // Assemble mass matrix
     auto weak_form = std::make_shared<AdvectionWeakFormulation>(velocity);
     auto assembler = std::make_shared<DGAssembler>(mesh, weak_form);
-    Eigen::MatrixXd M = tpetra_to_dense(*assembler->assemble_mass_matrix());
+    DView2 M = tpetra_to_dense(*assembler->assemble_mass_matrix());
 
     // Compute total mass: ∫u dx ≈ 1^T M u
-    Eigen::VectorXd ones = Eigen::VectorXd::Ones(n_dofs);
-    double initial_mass = ones.dot(M * u);
+    DView1 Mu("Mu", n_dofs);
+    gemv('N', 1.0, M, u, 0.0, Mu);
+    double initial_mass = 0.0;
+    for (int i = 0; i < n_dofs; ++i)
+        initial_mass += Mu(i);
 
     EXPECT_GT(initial_mass, 0.0) << "Initial mass should be positive";
 

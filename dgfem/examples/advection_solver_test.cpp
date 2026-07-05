@@ -8,11 +8,13 @@
 #include "dgfem/utils/example_helpers.hpp"
 #include "dgfem/utils/vtk_writer.hpp"
 
+#include <Kokkos_Core.hpp>
 #include <cmath>
 
 #include <iostream>
 
-int main() {
+int main(int argc, char** argv) {
+    Kokkos::ScopeGuard kokkos_guard(argc, argv);
     try {
         std::cout << "=== DGFEM Advection Solver Test ===" << std::endl;
 
@@ -21,8 +23,8 @@ int main() {
         dgfem::MeshSetup::print_info(mesh);
 
         // Advection velocity (diagonal flow)
-        Eigen::Vector2d velocity(0.1, 0.1);
-        std::cout << "  Advection velocity: [" << velocity(0) << ", " << velocity(1) << "]"
+        dgfem::Vec2 velocity{0.1, 0.1};
+        std::cout << "  Advection velocity: [" << velocity[0] << ", " << velocity[1] << "]"
                   << std::endl;
 
         // Boundary conditions: Inflow (Left/Bottom) = 0, Outflow (Right/Top) = natural
@@ -31,8 +33,8 @@ int main() {
         mesh->set_boundary_condition("Left", bc_zero);
 
         // Initial condition: Gaussian pulse at center
-        auto initial_condition = [](const Eigen::Vector2d& x) -> double {
-            double r2 = std::pow(x(0) - 0.5, 2) + std::pow(x(1) - 0.5, 2);
+        auto initial_condition = [](const dgfem::Vec2& x) -> double {
+            double r2 = std::pow(x[0] - 0.5, 2) + std::pow(x[1] - 0.5, 2);
             return std::exp(-r2 / (2.0 * 0.05 * 0.05));
         };
 
@@ -49,25 +51,45 @@ int main() {
         dgfem::AdvectionDGSolver solver(mesh, velocity);
         auto solutions = solver.solve(initial_condition, T_final, dt, bc_zero, save_every);
 
+        auto to_dview = [](const Teuchos::RCP<dgfem::TpetraMultiVector>& v) {
+            auto view = v->getLocalViewHost(Tpetra::Access::ReadOnly);
+            dgfem::DView1 out("frame", v->getLocalLength());
+            for (size_t i = 0; i < v->getLocalLength(); ++i) {
+                out(i) = view(i, 0);
+            }
+            return out;
+        };
+        auto sum_of = [](const Teuchos::RCP<dgfem::TpetraMultiVector>& v) {
+            auto view = v->getLocalViewHost(Tpetra::Access::ReadOnly);
+            double s = 0.0;
+            for (size_t i = 0; i < v->getLocalLength(); ++i) {
+                s += view(i, 0);
+            }
+            return s;
+        };
+
         // Export and validate
         std::cout << "\n--- Exporting " << solutions.size() << " frames ---" << std::endl;
         for (size_t i = 0; i < solutions.size(); ++i) {
-            dgfem::VTKWriter::write_solution(
-                mesh, solutions[i], "../../output/advection_solution_" + std::to_string(i));
+            dgfem::VTKWriter::write_solution(mesh, to_dview(solutions[i]),
+                                             "../../output/advection_solution_" +
+                                                 std::to_string(i));
             if (i % 5 == 0 || i == solutions.size() - 1)
                 std::cout << "  Frame " << i << std::endl;
         }
 
         // Statistics
-        double norm_ratio = solutions.back().norm() / solutions[0].norm();
+        double norm_final = solutions.back()->getVector(0)->norm2();
+        double norm_initial = solutions[0]->getVector(0)->norm2();
+        double norm_ratio = norm_final / norm_initial;
         std::cout << "\n--- Results ---" << std::endl;
         std::cout << "  Solution norm ratio (final/initial): " << norm_ratio << std::endl;
         std::cout << "  Mass change: "
-                  << std::abs(solutions.back().sum() - solutions[0].sum()) /
-                         std::abs(solutions[0].sum()) * 100
+                  << std::abs(sum_of(solutions.back()) - sum_of(solutions[0])) /
+                         std::abs(sum_of(solutions[0])) * 100
                   << "%" << std::endl;
 
-        bool passed = !std::isnan(solutions.back().norm()) && norm_ratio < 2.0;
+        bool passed = !std::isnan(norm_final) && norm_ratio < 2.0;
         dgfem::MeshCreator::finalize_gmsh();
 
         std::cout << "\n=== Test " << (passed ? "PASSED" : "FAILED") << " ===" << std::endl;

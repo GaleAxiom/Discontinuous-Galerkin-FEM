@@ -1,7 +1,7 @@
-#include <Eigen/Dense>
 #include <cmath>
 #include <dgfem/boundary/conditions.hpp>
 #include <dgfem/core/space.hpp>
+#include <dgfem/kokkos_math.hpp>
 #include <dgfem/solver/dg_solver.hpp>
 #include <dgfem/solver/weak_form.hpp>
 #include <dgfem/utils/mesh_creation.hpp>
@@ -112,7 +112,7 @@ struct CompressibleBlasiusAnalytic {
     double p_inf;
     double x_min;
 
-    [[nodiscard]] Eigen::Vector4d primitive(const Eigen::Vector2d& x) const {
+    [[nodiscard]] Vec4 primitive(const Vec2& x) const {
         const auto& table = get_blasius_table();
 
         double x_pos = std::max(x[0], x_min);
@@ -134,18 +134,16 @@ struct CompressibleBlasiusAnalytic {
         double v = v_prefactor * (eta * fp_val - f_val);
         double p = p_inf;
 
-        Eigen::Vector4d W;
-        W << rho, u, v, p;
-        return W;
+        return Vec4{rho, u, v, p};
     }
 
-    [[nodiscard]] Eigen::Vector4d conserved(const Eigen::Vector2d& x) const {
+    [[nodiscard]] Vec4 conserved(const Vec2& x) const {
         return primitive_to_conserved(primitive(x), gamma);
     }
 };
 
 [[nodiscard]] double compute_variable_error(const std::shared_ptr<DGMesh>& mesh,
-                                            const Eigen::MatrixXd& numerical_sol,
+                                            const DView2& numerical_sol,
                                             const CompressibleBlasiusAnalytic& exact, double gamma,
                                             int var_idx) {
     auto space = mesh->get_dg_space();
@@ -160,27 +158,24 @@ struct CompressibleBlasiusAnalytic {
 
     for (int elem = 0; elem < mesh->get_n_elements(); ++elem) {
         const auto& elem_data = mesh->get_element_data(elem);
-        const Eigen::VectorXd& J_det = elem_data.at("J_det_vol");
+        const DView2& J_det = elem_data.at("J_det_vol");
 
-        Eigen::MatrixXd vertices(mesh->get_elements().cols(), 2);
-        for (int i = 0; i < vertices.rows(); ++i) {
-            vertices.row(i) = mesh->get_vertices().row(mesh->get_elements()(elem, i));
-        }
+        DView2 vertices = mesh->get_element_vertices(elem);
 
-        for (int q = 0; q < quad_wts.size(); ++q) {
-            Eigen::Vector2d x_phys = mapping->map_to_physical(vertices, quad_pts.row(q));
+        for (int q = 0; q < static_cast<int>(quad_wts.size()); ++q) {
+            Vec2 x_phys = mapping->map_to_physical(vertices, row2(quad_pts, q));
 
-            Eigen::Vector4d U_num = Eigen::Vector4d::Zero();
+            Vec4 U_num{0.0, 0.0, 0.0, 0.0};
             for (int i = 0; i < n_basis; ++i) {
                 for (int v = 0; v < 4; ++v) {
                     U_num[v] += numerical_sol(elem, i * 4 + v) * phi(q, i);
                 }
             }
 
-            Eigen::Vector4d W_num = conserved_to_primitive(U_num, gamma);
-            Eigen::Vector4d W_exact = exact.primitive(x_phys);
+            Vec4 W_num = conserved_to_primitive(U_num, gamma);
+            Vec4 W_exact = exact.primitive(x_phys);
 
-            double weight = quad_wts(q) * std::abs(J_det(q));
+            double weight = quad_wts(q) * std::abs(J_det(q, 0));
             double diff = W_num[var_idx] - W_exact[var_idx];
             error_sq += diff * diff * weight;
             norm_sq += W_exact[var_idx] * W_exact[var_idx] * weight;
@@ -223,7 +218,7 @@ TEST_F(NavierStokesBlasiusAccuracyTest, MaintainsCompressibleBlasiusProfile) {
     mesh->initialize_dg_space(space, 4);
 
     auto blasius_bc = std::make_shared<BoundaryConditionEuler>(
-        BCTypeEuler::FAR_FIELD, [exact](const Eigen::Vector2d& x) { return exact.conserved(x); });
+        BCTypeEuler::FAR_FIELD, [exact](const Vec2& x) { return exact.conserved(x); });
 
     for (const auto& [name, _] : mesh->get_boundary_tags()) {
         mesh->set_boundary_condition_euler(name, blasius_bc);
@@ -238,8 +233,8 @@ TEST_F(NavierStokesBlasiusAccuracyTest, MaintainsCompressibleBlasiusProfile) {
     constexpr int save_every = 50;
 
     NavierStokesDGSolver solver(mesh, gamma, mu, prandtl, penalty);
-    auto frames = solver.solve([exact](const Eigen::Vector2d& x) { return exact.conserved(x); },
-                               T_final, dt, save_every);
+    auto frames = solver.solve([exact](const Vec2& x) { return exact.conserved(x); }, T_final, dt,
+                               save_every);
 
     ASSERT_FALSE(frames.empty());
     const auto& final_frame = frames.back();

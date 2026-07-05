@@ -14,7 +14,7 @@
 #include "dgfem/utils/example_helpers.hpp"
 #include "dgfem/utils/vtk_writer.hpp"
 
-#include <Eigen/Dense>
+#include <Kokkos_Core.hpp>
 #include <filesystem>
 
 #include <iomanip>
@@ -24,12 +24,12 @@
 namespace {
 
 struct CylinderChannelConfig {
-    double length = 3.0;               ///< Channel length
-    double height = 1.;                ///< Channel height
-    double radius = 0.05;              ///< Cylinder radius
-    Eigen::Vector2d center{0.2, 0.5};  ///< Cylinder center
-    double dx_channel = 0.025;         ///< Characteristic mesh size away from the cylinder
-    double dx_cylinder = 0.01;         ///< Refined size near the cylinder boundary
+    double length = 3.0;           ///< Channel length
+    double height = 1.;            ///< Channel height
+    double radius = 0.05;          ///< Cylinder radius
+    dgfem::Vec2 center{0.2, 0.5};  ///< Cylinder center
+    double dx_channel = 0.025;     ///< Characteristic mesh size away from the cylinder
+    double dx_cylinder = 0.01;     ///< Refined size near the cylinder boundary
 };
 
 struct UniformInflowProfile {
@@ -46,28 +46,26 @@ struct UniformInflowProfile {
 
     [[nodiscard]] double mean_velocity() const { return max_velocity; }
 
-    [[nodiscard]] Eigen::Vector4d primitive(const Eigen::Vector2d& x) const {
+    [[nodiscard]] dgfem::Vec4 primitive(const dgfem::Vec2& x) const {
         double u = velocity(x[1]);
-        Eigen::Vector4d W;
-        W << density, u, 0.0, pressure;
-        return W;
+        return dgfem::Vec4{density, u, 0.0, pressure};
     }
 
-    [[nodiscard]] Eigen::Vector4d conserved(const Eigen::Vector2d& x) const {
+    [[nodiscard]] dgfem::Vec4 conserved(const dgfem::Vec2& x) const {
         return dgfem::primitive_to_conserved(primitive(x), gamma);
     }
 };
 
 std::shared_ptr<dgfem::BoundaryConditionEuler> make_no_slip_bc(double density, double pressure) {
-    Eigen::Vector4d W;
-    W << density, 0.0, 0.0, pressure;
-    return std::make_shared<dgfem::BoundaryConditionEuler>(
-        dgfem::BCTypeEuler::NO_SLIP_WALL, [W](const Eigen::Vector2d&) { return W; });
+    dgfem::Vec4 W{density, 0.0, 0.0, pressure};
+    return std::make_shared<dgfem::BoundaryConditionEuler>(dgfem::BCTypeEuler::NO_SLIP_WALL,
+                                                           [W](const dgfem::Vec2&) { return W; });
 }
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    Kokkos::ScopeGuard kokkos_guard(argc, argv);
     try {
         std::cout << "=== DGFEM Navier-Stokes von Kármán Vortex Street Example ===" << std::endl;
 
@@ -95,10 +93,10 @@ int main() {
         // Boundary conditions
         auto inlet_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
             dgfem::BCTypeEuler::FAR_FIELD,
-            [inflow](const Eigen::Vector2d& x) { return inflow.conserved(x); });
+            [inflow](const dgfem::Vec2& x) { return inflow.conserved(x); });
 
         auto outlet_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
-            dgfem::BCTypeEuler::FAR_FIELD, [=](const Eigen::Vector2d& x) {
+            dgfem::BCTypeEuler::FAR_FIELD, [=](const dgfem::Vec2& x) {
                 // Mirror the uniform inflow profile to minimise reflections at the outlet
                 return inflow.conserved(x);
             });
@@ -137,8 +135,8 @@ int main() {
         dgfem::Timer solve_timer("von Kármán vortex solve");
         dgfem::NavierStokesDGSolver solver(mesh, gamma, mu, prandtl, penalty);
         auto solution_frames =
-            solver.solve([inflow](const Eigen::Vector2d& x) { return inflow.conserved(x); },
-                         T_final, dt, save_every);
+            solver.solve([inflow](const dgfem::Vec2& x) { return inflow.conserved(x); }, T_final,
+                         dt, save_every);
 
         if (solution_frames.empty()) {
             throw std::runtime_error("Navier-Stokes solver did not return any solution frames.");

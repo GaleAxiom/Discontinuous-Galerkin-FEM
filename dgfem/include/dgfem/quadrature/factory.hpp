@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <Eigen/Dense>
+#include "dgfem/kokkos_math.hpp"
 
 #include <memory>
 #include <vector>
@@ -16,12 +16,11 @@ namespace dgfem {
  * @brief Quadrature rule container
  */
 struct QuadratureRule {
-    Eigen::MatrixXd points;   ///< Quadrature points (n_points x dim)
-    Eigen::VectorXd weights;  ///< Quadrature weights (n_points)
+    DView2 points;   ///< Quadrature points (n_points x dim)
+    DView1 weights;  ///< Quadrature weights (n_points)
 
     // Constructor with move semantics
-    QuadratureRule(Eigen::MatrixXd pts, Eigen::VectorXd wts)
-        : points(std::move(pts)), weights(std::move(wts)) {}
+    QuadratureRule(DView2 pts, DView1 wts) : points(std::move(pts)), weights(std::move(wts)) {}
 
     // Delete copy, default move
     QuadratureRule(const QuadratureRule&) = delete;
@@ -29,12 +28,12 @@ struct QuadratureRule {
     QuadratureRule(QuadratureRule&&) noexcept = default;
     QuadratureRule& operator=(QuadratureRule&&) noexcept = default;
 
-    [[nodiscard]] int size() const noexcept { return static_cast<int>(weights.size()); }
-    [[nodiscard]] int dimension() const noexcept { return static_cast<int>(points.cols()); }
+    [[nodiscard]] int size() const noexcept { return static_cast<int>(weights.extent(0)); }
+    [[nodiscard]] int dimension() const noexcept { return static_cast<int>(points.extent(1)); }
 
     // Validate the rule
     [[nodiscard]] bool is_valid() const noexcept {
-        return points.rows() == weights.size() && points.rows() > 0;
+        return points.extent(0) == weights.extent(0) && points.extent(0) > 0;
     }
 };
 
@@ -82,12 +81,12 @@ private:
     /**
      * @brief Compute Gauss-Legendre points and weights
      */
-    static void compute_gauss_legendre(int n, Eigen::VectorXd& points, Eigen::VectorXd& weights);
+    static void compute_gauss_legendre(int n, DView1& points, DView1& weights);
 
     /**
      * @brief Get pre-computed Dunavant rules
      */
-    static void get_dunavant_rule(int order, Eigen::MatrixXd& points, Eigen::VectorXd& weights);
+    static void get_dunavant_rule(int order, DView2& points, DView1& weights);
 };
 
 }  // namespace dgfem

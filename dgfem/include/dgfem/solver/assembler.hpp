@@ -8,7 +8,6 @@
 #include "dgfem/core/mesh.hpp"
 #include "dgfem/core/space.hpp"
 
-#include <Eigen/Sparse>
 #include <variant>
 
 #include <functional>
@@ -43,8 +42,8 @@ public:
      * @param bc_func Boundary condition function for time-dependent equations
      * @return For time-dependent equations, returns (operator_matrix, boundary_vector)
      */
-    void assemble(std::function<double(const Eigen::Vector2d&)> source_func = nullptr,
-                  std::function<double(const Eigen::Vector2d&)> bc_func = nullptr);
+    void assemble(std::function<double(const Vec2&)> source_func = nullptr,
+                  std::function<double(const Vec2&)> bc_func = nullptr);
 
     /**
      * @brief Assemble mass matrix for time-dependent problems
@@ -56,8 +55,8 @@ public:
      * @param u_coeffs Solution coefficients for each element (n_elem, n_basis, n_vars)
      * @return Residual for each element (n_elem, n_basis, n_vars)
      */
-    void assemble_euler_residual(const std::vector<Eigen::MatrixXd>& u_coeffs,
-                                 std::vector<Eigen::MatrixXd>& residuals_out);
+    void assemble_euler_residual(const std::vector<DView2>& u_coeffs,
+                                 std::vector<DView2>& residuals_out);
 
     /**
      * @brief Get the weak formulation type
@@ -100,12 +99,12 @@ public:
     /**
      * @brief Add local matrix to global system
      */
-    void add_to_matrix(int elem_i, int elem_j, const Eigen::MatrixXd& K_local);
+    void add_to_matrix(int elem_i, int elem_j, const DView2& K_local);
 
     /**
      * @brief Add to RHS vector
      */
-    void add_to_rhs(int elem_id, const Eigen::VectorXd& F_local);
+    void add_to_rhs(int elem_id, const DView1& F_local);
 
     /**
      * @brief Clear assembly data
@@ -157,7 +156,11 @@ private:
     Teuchos::RCP<TpetraMultiVector> rhs_;
 
     // Assembly helpers
-    std::vector<Eigen::Triplet<double>> triplets_;
+    struct Triplet {
+        int row, col;
+        double value;
+    };
+    std::vector<Triplet> triplets_;
 
     /**
      * @brief Set the weak formulation (helper for constructor)

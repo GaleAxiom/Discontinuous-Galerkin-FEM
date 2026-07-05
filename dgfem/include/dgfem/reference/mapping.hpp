@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include <Eigen/Dense>
 #include <optional>
 
 #include <memory>
@@ -19,10 +18,10 @@ namespace dgfem {
  * Uses aggregate initialization
  */
 struct MappingData {
-    Eigen::Vector2d x_phys;  ///< Physical coordinates
-    Eigen::Matrix2d J;       ///< Jacobian transposed matrix
-    double J_T_det;          ///< Jacobian determinant
-    Eigen::Matrix2d dxi_dx;  ///< Inverse Jacobian (dx/dxi)^T
+    Vec2 x_phys;     ///< Physical coordinates
+    Mat2 J;          ///< Jacobian transposed matrix
+    double J_T_det;  ///< Jacobian determinant
+    Mat2 dxi_dx;     ///< Inverse Jacobian (dx/dxi)^T
 
     // Utility methods
     [[nodiscard]] constexpr bool is_valid() const noexcept { return std::abs(J_T_det) > 1e-14; }
@@ -52,22 +51,20 @@ public:
      * @param xi Reference coordinates
      * @return MappingData structure with computed values
      */
-    [[nodiscard]] MappingData compute_mapping(const Eigen::MatrixXd& vertices,
-                                              const Eigen::Vector2d& xi) const;
+    [[nodiscard]] MappingData compute_mapping(const DView2& vertices, const Vec2& xi) const;
 
     /**
      * @brief Map reference coordinates to physical coordinates
      */
-    [[nodiscard]] Eigen::Vector2d map_to_physical(const Eigen::MatrixXd& vertices,
-                                                  const Eigen::Vector2d& xi) const;
+    [[nodiscard]] Vec2 map_to_physical(const DView2& vertices, const Vec2& xi) const;
 
     /**
      * @brief Find reference coordinates for given physical point (Newton iteration)
      * Returns std::optional - empty if convergence fails
      */
-    [[nodiscard]] std::optional<Eigen::Vector2d>
-    find_reference_coords(const Eigen::MatrixXd& vertices, const Eigen::Vector2d& x_phys,
-                          double tol = 1e-10, int max_iter = 20) const;
+    [[nodiscard]] std::optional<Vec2> find_reference_coords(const DView2& vertices,
+                                                            const Vec2& x_phys, double tol = 1e-10,
+                                                            int max_iter = 20) const;
 
     [[nodiscard]] const std::shared_ptr<ReferenceElement>& get_ref_element() const noexcept {
         return ref_element_;
@@ -76,8 +73,7 @@ public:
     /**
      * @brief Compute shape functions and their derivatives (public for testing)
      */
-    void compute_shape_functions(const Eigen::Vector2d& xi, Eigen::VectorXd& N,
-                                 Eigen::MatrixXd& dN_dxi) const;
+    void compute_shape_functions(const Vec2& xi, DView1& N, DView2& dN_dxi) const;
 
 private:
     std::shared_ptr<ReferenceElement> ref_element_;

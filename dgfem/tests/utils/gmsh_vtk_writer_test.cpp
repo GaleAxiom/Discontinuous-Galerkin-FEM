@@ -6,11 +6,13 @@
 #include "dgfem/boundary/conditions.hpp"
 #include "dgfem/core/mesh.hpp"
 #include "dgfem/core/space.hpp"
+#include "dgfem/kokkos_math.hpp"
 #include "dgfem/solver/dg_solver.hpp"
 #include "dgfem/utils/mesh_creation.hpp"
 #include "dgfem/utils/vtk_writer.hpp"
 
 #include <cmath>
+#include <cstdlib>
 
 #include <fstream>
 
@@ -36,16 +38,16 @@ TEST_F(GMSHVTKWriterTest, WriteWithAnalyticalComparison) {
     mesh->set_boundary_condition("Left", bc_zero);
     mesh->set_boundary_condition("Right", bc_zero);
 
-    auto exact_solution = [](const Eigen::Vector2d& x) -> double {
+    auto exact_solution = [](const Vec2& x) -> double {
         return x[0] * (1 - x[0]) * x[1] * (1 - x[1]);
     };
 
-    auto source_func = [](const Eigen::Vector2d& x) -> double {
+    auto source_func = [](const Vec2& x) -> double {
         return 2.0 * (x[1] * (1 - x[1]) + x[0] * (1 - x[0]));
     };
 
     LaplaceDGSolver solver(mesh, 10.0);
-    Eigen::VectorXd solution = solver.solve(source_func);
+    DView1 solution = solver.solve(source_func);
 
     std::string filename = "gtest_vtk_writer_gmsh_output";
     VTKWriter::write_with_analytical(mesh, solution, exact_solution, filename, 4);
@@ -73,11 +75,16 @@ TEST_F(GMSHVTKWriterTest, MultiVariableOutput) {
     int n_dofs = mesh->get_n_elements() * dg_space->get_n_dofs();
 
     // Create multiple fields
-    Eigen::VectorXd field1 = Eigen::VectorXd::Random(n_dofs);
-    Eigen::VectorXd field2 = Eigen::VectorXd::Random(n_dofs);
-    Eigen::VectorXd field3 = field1.array() * field2.array();
+    DView1 field1("field1", n_dofs);
+    DView1 field2("field2", n_dofs);
+    DView1 field3("field3", n_dofs);
+    for (int i = 0; i < n_dofs; ++i) {
+        field1(i) = static_cast<double>(std::rand()) / RAND_MAX;
+        field2(i) = static_cast<double>(std::rand()) / RAND_MAX;
+        field3(i) = field1(i) * field2(i);
+    }
 
-    std::vector<Eigen::VectorXd> solutions = {field1, field2, field3};
+    std::vector<DView1> solutions = {field1, field2, field3};
     std::vector<std::string> names = {"rho", "u", "p"};
 
     std::string filename = "test_multi_field";

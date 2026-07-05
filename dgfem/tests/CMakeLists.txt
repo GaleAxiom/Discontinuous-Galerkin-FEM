@@ -7,6 +7,7 @@ include_directories(${GTEST_INCLUDE_DIRS} .)
 
 # Add test executable
 add_executable(dgfem_tests
+    main.cpp
     basis/legendre_test.cpp
     basis/orthogonal_test.cpp
     basis/dubiner_test.cpp
@@ -37,9 +38,7 @@ target_link_libraries(dgfem_tests
     PRIVATE
     dgfem
     GTest::gtest
-    GTest::gtest_main
     GTest::gmock
-    GTest::gmock_main
 )
 
 # Automatically create individual ctest entries for every GoogleTest

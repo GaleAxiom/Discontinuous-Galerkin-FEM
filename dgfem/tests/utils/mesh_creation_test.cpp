@@ -1,6 +1,6 @@
-#include <Eigen/Dense>
 #include <cmath>
 #include <dgfem/core/mesh.hpp>
+#include <dgfem/kokkos_math.hpp>
 #include <dgfem/reference/elements.hpp>
 #include <dgfem/reference/mapping.hpp>
 #include <dgfem/utils/mesh_creation.hpp>
@@ -28,8 +28,8 @@ TEST_F(MeshCreationFixture, CreateRectangularMeshTriangles) {
     EXPECT_GT(mesh_tri->get_n_elements(), 0) << "Should have at least one triangle element";
 
     // Verify mesh has vertices
-    EXPECT_GT(mesh_tri->get_vertices().rows(), 0) << "Should have vertices";
-    EXPECT_EQ(mesh_tri->get_vertices().cols(), 2) << "Vertices should be 2D";
+    EXPECT_GT(mesh_tri->get_vertices().extent(0), 0) << "Should have vertices";
+    EXPECT_EQ(mesh_tri->get_vertices().extent(1), 2) << "Vertices should be 2D";
 
     // Verify boundary faces exist
     EXPECT_GT(mesh_tri->get_boundary_faces().size(), 0) << "Should have boundary faces";
@@ -39,7 +39,7 @@ TEST_F(MeshCreationFixture, CreateRectangularMeshTriangles) {
     EXPECT_LE(mesh_tri->get_n_elements(), 50) << "Too many triangles for given mesh size";
 
     // Verify triangle elements have 3 vertices each
-    EXPECT_EQ(mesh_tri->get_elements().cols(), 3) << "Triangle elements should have 3 vertices";
+    EXPECT_EQ(mesh_tri->get_elements().extent(1), 3) << "Triangle elements should have 3 vertices";
 }
 
 TEST_F(MeshCreationFixture, CreateRectangularMeshQuads) {
@@ -56,8 +56,8 @@ TEST_F(MeshCreationFixture, CreateRectangularMeshQuads) {
     // Verify mesh has vertices
     const auto& vertices = mesh_quad->get_vertices();
 
-    EXPECT_GT(vertices.rows(), 0) << "Should have vertices";
-    EXPECT_EQ(vertices.cols(), 2) << "Vertices should be 2D";
+    EXPECT_GT(vertices.extent(0), 0) << "Should have vertices";
+    EXPECT_EQ(vertices.extent(1), 2) << "Vertices should be 2D";
 
     // Verify boundary faces exist
     const auto& boundary_faces = mesh_quad->get_boundary_faces();
@@ -70,7 +70,7 @@ TEST_F(MeshCreationFixture, CreateRectangularMeshQuads) {
     // Verify quad elements have 4 vertices each
     const auto& elements = mesh_quad->get_elements();
 
-    EXPECT_EQ(elements.cols(), 4) << "Quad elements should have 4 vertices";
+    EXPECT_EQ(elements.extent(1), 4) << "Quad elements should have 4 vertices";
 
     // Verify boundary - unit square should have 4 boundary edges (one per side)
     // With 4 quads in a 2x2 grid, there should be 8 boundary faces total (2 per side)
@@ -94,7 +94,7 @@ TEST_F(MeshCreationFixture, CreateEulerMesh) {
     // Verify vertices are within domain
     const auto& vertices = mesh->get_vertices();
 
-    for (int i = 0; i < vertices.rows(); ++i) {
+    for (int i = 0; i < vertices.extent(0); ++i) {
         EXPECT_GE(vertices(i, 0), -5.0 - 0.3) << "X coordinate should be >= -5 at vertex " << i;
         EXPECT_LE(vertices(i, 0), 5.0 + 0.3) << "X coordinate should be <= 5 at vertex " << i;
         EXPECT_GE(vertices(i, 1), -5.0 - 0.3) << "Y coordinate should be >= -5 at vertex " << i;
@@ -111,7 +111,7 @@ TEST_F(MeshCreationFixture, CreateCustomDomainMesh) {
 
     // Verify vertices are within custom domain [-1,2] x [0.5,3]
     const auto& vertices = mesh->get_vertices();
-    for (int i = 0; i < vertices.rows(); ++i) {
+    for (int i = 0; i < vertices.extent(0); ++i) {
         EXPECT_GE(vertices(i, 0), -1.0 - 0.3) << "X coordinate should be >= -1";
         EXPECT_LE(vertices(i, 0), 2.0 + 0.3) << "X coordinate should be <= 2";
         EXPECT_GE(vertices(i, 1), 0.5 - 0.3) << "Y coordinate should be >= 0.5";
@@ -149,10 +149,13 @@ TEST_F(MeshCreationFixture, BoundaryTagsExist) {
 
 TEST(MeshCreationUtilsTest, FindReferenceCoordsQuadCenter) {
     // Test finding reference coords for center of unit square
-    Eigen::MatrixXd vertices(4, 2);
-    vertices << 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0;
+    DView2 vertices("vertices", 4, 2);
+    set_row2(vertices, 0, Vec2{0.0, 0.0});
+    set_row2(vertices, 1, Vec2{1.0, 0.0});
+    set_row2(vertices, 2, Vec2{1.0, 1.0});
+    set_row2(vertices, 3, Vec2{0.0, 1.0});
 
-    Eigen::Vector2d x_phys(0.5, 0.5);
+    Vec2 x_phys{0.5, 0.5};
     auto xi = find_reference_coords(x_phys, vertices, "quad");
 
     ASSERT_TRUE(xi.has_value()) << "Should find reference coords for center point";
@@ -164,23 +167,22 @@ TEST(MeshCreationUtilsTest, FindReferenceCoordsQuadCenter) {
 
 TEST(MeshCreationUtilsTest, FindReferenceCoordsQuadCorners) {
     // Test all four corners of unit square
-    Eigen::MatrixXd vertices(4, 2);
-    vertices << 0.0, 0.0,  // v0: bottom-left
-        1.0, 0.0,          // v1: bottom-right
-        1.0, 1.0,          // v2: top-right
-        0.0, 1.0;          // v3: top-left
+    DView2 vertices("vertices", 4, 2);
+    set_row2(vertices, 0, Vec2{0.0, 0.0});  // v0: bottom-left
+    set_row2(vertices, 1, Vec2{1.0, 0.0});  // v1: bottom-right
+    set_row2(vertices, 2, Vec2{1.0, 1.0});  // v2: top-right
+    set_row2(vertices, 3, Vec2{0.0, 1.0});  // v3: top-left
 
     struct TestCase {
-        Eigen::Vector2d physical;
-        Eigen::Vector2d reference;
+        Vec2 physical;
+        Vec2 reference;
         std::string name;
     };
 
-    std::vector<TestCase> test_cases = {
-        {Eigen::Vector2d(0.0, 0.0), Eigen::Vector2d(-1.0, -1.0), "bottom-left"},
-        {Eigen::Vector2d(1.0, 0.0), Eigen::Vector2d(1.0, -1.0), "bottom-right"},
-        {Eigen::Vector2d(1.0, 1.0), Eigen::Vector2d(1.0, 1.0), "top-right"},
-        {Eigen::Vector2d(0.0, 1.0), Eigen::Vector2d(-1.0, 1.0), "top-left"}};
+    std::vector<TestCase> test_cases = {{Vec2{0.0, 0.0}, Vec2{-1.0, -1.0}, "bottom-left"},
+                                        {Vec2{1.0, 0.0}, Vec2{1.0, -1.0}, "bottom-right"},
+                                        {Vec2{1.0, 1.0}, Vec2{1.0, 1.0}, "top-right"},
+                                        {Vec2{0.0, 1.0}, Vec2{-1.0, 1.0}, "top-left"}};
 
     for (const auto& tc : test_cases) {
         auto xi = find_reference_coords(tc.physical, vertices, "quad");
@@ -192,20 +194,22 @@ TEST(MeshCreationUtilsTest, FindReferenceCoordsQuadCorners) {
 
 TEST(MeshCreationUtilsTest, FindReferenceCoordsQuadEdges) {
     // Test edge midpoints
-    Eigen::MatrixXd vertices(4, 2);
-    vertices << 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0;
+    DView2 vertices("vertices", 4, 2);
+    set_row2(vertices, 0, Vec2{0.0, 0.0});
+    set_row2(vertices, 1, Vec2{1.0, 0.0});
+    set_row2(vertices, 2, Vec2{1.0, 1.0});
+    set_row2(vertices, 3, Vec2{0.0, 1.0});
 
     struct EdgeTest {
-        Eigen::Vector2d physical;
-        Eigen::Vector2d reference;
+        Vec2 physical;
+        Vec2 reference;
         std::string edge;
     };
 
-    std::vector<EdgeTest> edge_tests = {
-        {Eigen::Vector2d(0.5, 0.0), Eigen::Vector2d(0.0, -1.0), "bottom edge"},
-        {Eigen::Vector2d(1.0, 0.5), Eigen::Vector2d(1.0, 0.0), "right edge"},
-        {Eigen::Vector2d(0.5, 1.0), Eigen::Vector2d(0.0, 1.0), "top edge"},
-        {Eigen::Vector2d(0.0, 0.5), Eigen::Vector2d(-1.0, 0.0), "left edge"}};
+    std::vector<EdgeTest> edge_tests = {{Vec2{0.5, 0.0}, Vec2{0.0, -1.0}, "bottom edge"},
+                                        {Vec2{1.0, 0.5}, Vec2{1.0, 0.0}, "right edge"},
+                                        {Vec2{0.5, 1.0}, Vec2{0.0, 1.0}, "top edge"},
+                                        {Vec2{0.0, 0.5}, Vec2{-1.0, 0.0}, "left edge"}};
 
     for (const auto& et : edge_tests) {
         auto xi = find_reference_coords(et.physical, vertices, "quad");
@@ -217,10 +221,13 @@ TEST(MeshCreationUtilsTest, FindReferenceCoordsQuadEdges) {
 
 TEST(MeshCreationUtilsTest, FindReferenceCoordsOutsideElement) {
     // Test point clearly outside the element
-    Eigen::MatrixXd vertices(4, 2);
-    vertices << 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0;
+    DView2 vertices("vertices", 4, 2);
+    set_row2(vertices, 0, Vec2{0.0, 0.0});
+    set_row2(vertices, 1, Vec2{1.0, 0.0});
+    set_row2(vertices, 2, Vec2{1.0, 1.0});
+    set_row2(vertices, 3, Vec2{0.0, 1.0});
 
-    Eigen::Vector2d x_phys(2.0, 2.0);  // Far outside
+    Vec2 x_phys{2.0, 2.0};  // Far outside
 
     // The function should throw when Newton iteration fails to converge
     EXPECT_THROW(find_reference_coords(x_phys, vertices, "quad"), std::runtime_error);
@@ -228,13 +235,13 @@ TEST(MeshCreationUtilsTest, FindReferenceCoordsOutsideElement) {
 
 TEST(MeshCreationUtilsTest, FindReferenceCoordsTriangle) {
     // Test triangle mapping
-    Eigen::MatrixXd vertices(3, 2);
-    vertices << 0.0, 0.0,  // v0
-        1.0, 0.0,          // v1
-        0.0, 1.0;          // v2
+    DView2 vertices("vertices", 3, 2);
+    set_row2(vertices, 0, Vec2{0.0, 0.0});  // v0
+    set_row2(vertices, 1, Vec2{1.0, 0.0});  // v1
+    set_row2(vertices, 2, Vec2{0.0, 1.0});  // v2
 
     // Test center of triangle
-    Eigen::Vector2d centroid(1.0 / 3.0, 1.0 / 3.0);
+    Vec2 centroid{1.0 / 3.0, 1.0 / 3.0};
     auto xi = find_reference_coords(centroid, vertices, "triangle");
 
     ASSERT_TRUE(xi.has_value()) << "Should find reference coords for triangle centroid";
@@ -246,11 +253,14 @@ TEST(MeshCreationUtilsTest, FindReferenceCoordsTriangle) {
 
 TEST(MeshCreationUtilsTest, FindReferenceCoordsNonStandardQuad) {
     // Test with a non-axis-aligned quad (rotated/scaled)
-    Eigen::MatrixXd vertices(4, 2);
-    vertices << -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5;
+    DView2 vertices("vertices", 4, 2);
+    set_row2(vertices, 0, Vec2{-0.5, -0.5});
+    set_row2(vertices, 1, Vec2{0.5, -0.5});
+    set_row2(vertices, 2, Vec2{0.5, 0.5});
+    set_row2(vertices, 3, Vec2{-0.5, 0.5});
 
     // Center should still map to (0, 0) in reference
-    Eigen::Vector2d center(0.0, 0.0);
+    Vec2 center{0.0, 0.0};
     auto xi = find_reference_coords(center, vertices, "quad");
 
     ASSERT_TRUE(xi.has_value()) << "Should find reference coords for centered quad";

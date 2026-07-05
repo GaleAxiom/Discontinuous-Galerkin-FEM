@@ -15,14 +15,14 @@ namespace dgfem {
 /**
  * @brief Tensor product Legendre basis for quadrilaterals with modern C++ features
  */
-class LegendreBasis : public OrthogonalBasis {
+class LegendreBasis : public OrthogonalBasisCRTP<LegendreBasis> {
 public:
     explicit LegendreBasis(int order);
 
-    Eigen::VectorXd evaluate(const Eigen::Vector2d& xi) const override;
-    Eigen::MatrixXd evaluate_gradient(const Eigen::Vector2d& xi) const override;
+    DView1 evaluate_impl(const Vec2& xi) const;
+    DView2 evaluate_gradient_impl(const Vec2& xi) const;
 
-    int compute_n_basis() const override;
+    int compute_n_basis_impl() const;
 
     // Maximum supported order for compile-time optimizations
     static constexpr int MAX_ORDER = 10;

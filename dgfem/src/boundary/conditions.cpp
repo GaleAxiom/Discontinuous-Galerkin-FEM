@@ -13,8 +13,7 @@ namespace dgfem {
 BoundaryCondition::BoundaryCondition(BCType type, double value)
     : type_(type), constant_value_(value), is_function_(false), robin_alpha_(0.0) {}
 
-BoundaryCondition::BoundaryCondition(BCType type,
-                                     std::function<double(const Eigen::Vector2d&)> func)
+BoundaryCondition::BoundaryCondition(BCType type, std::function<double(const Vec2&)> func)
     : type_(type), function_value_(func), is_function_(true), robin_alpha_(0.0) {}
 
 BoundaryCondition::BoundaryCondition(BCType type, double value, double robin_alpha)
@@ -25,8 +24,7 @@ BoundaryCondition::BoundaryCondition(BCType type, double value, double robin_alp
     }
 }
 
-BoundaryCondition::BoundaryCondition(BCType type,
-                                     std::function<double(const Eigen::Vector2d&)> func,
+BoundaryCondition::BoundaryCondition(BCType type, std::function<double(const Vec2&)> func,
                                      double robin_alpha)
     : type_(type), function_value_(func), is_function_(true), robin_alpha_(robin_alpha) {
     if (type != BCType::ROBIN) {
@@ -35,7 +33,7 @@ BoundaryCondition::BoundaryCondition(BCType type,
     }
 }
 
-double BoundaryCondition::evaluate(const Eigen::Vector2d& x) const {
+double BoundaryCondition::evaluate(const Vec2& x) const {
     if (is_function_) {
         return function_value_(x);
     } else {
@@ -44,14 +42,14 @@ double BoundaryCondition::evaluate(const Eigen::Vector2d& x) const {
 }
 
 // BoundaryConditionEuler implementations
-BoundaryConditionEuler::BoundaryConditionEuler(BCTypeEuler type, const Eigen::Vector4d& value)
+BoundaryConditionEuler::BoundaryConditionEuler(BCTypeEuler type, const Vec4& value)
     : type_(type), constant_value_(value), is_function_(false) {}
 
-BoundaryConditionEuler::BoundaryConditionEuler(
-    BCTypeEuler type, std::function<Eigen::Vector4d(const Eigen::Vector2d&)> func)
+BoundaryConditionEuler::BoundaryConditionEuler(BCTypeEuler type,
+                                               std::function<Vec4(const Vec2&)> func)
     : type_(type), function_value_(func), is_function_(true) {}
 
-Eigen::Vector4d BoundaryConditionEuler::evaluate(const Eigen::Vector2d& x) const {
+Vec4 BoundaryConditionEuler::evaluate(const Vec2& x) const {
     if (is_function_) {
         return function_value_(x);
     } else {
@@ -64,8 +62,7 @@ std::shared_ptr<BoundaryCondition> make_dirichlet_bc(double value) {
     return std::make_shared<BoundaryCondition>(BCType::DIRICHLET, value);
 }
 
-std::shared_ptr<BoundaryCondition>
-make_dirichlet_bc(std::function<double(const Eigen::Vector2d&)> func) {
+std::shared_ptr<BoundaryCondition> make_dirichlet_bc(std::function<double(const Vec2&)> func) {
     return std::make_shared<BoundaryCondition>(BCType::DIRICHLET, func);
 }
 
@@ -73,8 +70,7 @@ std::shared_ptr<BoundaryCondition> make_neumann_bc(double value) {
     return std::make_shared<BoundaryCondition>(BCType::NEUMANN, value);
 }
 
-std::shared_ptr<BoundaryCondition>
-make_neumann_bc(std::function<double(const Eigen::Vector2d&)> func) {
+std::shared_ptr<BoundaryCondition> make_neumann_bc(std::function<double(const Vec2&)> func) {
     return std::make_shared<BoundaryCondition>(BCType::NEUMANN, func);
 }
 
@@ -82,7 +78,7 @@ std::shared_ptr<BoundaryCondition> make_robin_bc(double value, double alpha) {
     return std::make_shared<BoundaryCondition>(BCType::ROBIN, value, alpha);
 }
 
-std::shared_ptr<BoundaryCondition> make_robin_bc(std::function<double(const Eigen::Vector2d&)> func,
+std::shared_ptr<BoundaryCondition> make_robin_bc(std::function<double(const Vec2&)> func,
                                                  double alpha) {
     return std::make_shared<BoundaryCondition>(BCType::ROBIN, func, alpha);
 }

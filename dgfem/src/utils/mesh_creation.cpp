@@ -99,10 +99,11 @@ std::shared_ptr<DGMesh> MeshCreator::create_euler_mesh(double xmin, double xmax,
     return create_dg_mesh_from_gmsh();
 }
 
-std::shared_ptr<DGMesh>
-MeshCreator::create_cylinder_channel_mesh(double length, double height, double radius,
-                                          const Eigen::Vector2d& center, double dx_channel,
-                                          double dx_cylinder, bool use_triangles) {
+std::shared_ptr<DGMesh> MeshCreator::create_cylinder_channel_mesh(double length, double height,
+                                                                  double radius, const Vec2& center,
+                                                                  double dx_channel,
+                                                                  double dx_cylinder,
+                                                                  bool use_triangles) {
     // Remove any existing models to prevent conflicts
     std::vector<std::string> existing_models;
     gmsh::model::list(existing_models);
@@ -197,9 +198,9 @@ MeshCreator::create_cylinder_channel_mesh(double length, double height, double r
 }
 
 std::shared_ptr<DGMesh> MeshCreator::create_dg_mesh_from_gmsh() {
-    Eigen::MatrixXd vertices;
-    Eigen::MatrixXi elements;
-    Eigen::VectorXi element_tags;
+    DView2 vertices;
+    IView2 elements;
+    IView1 element_tags;
     std::map<std::string, int> boundary_tags;
     std::map<int, std::vector<std::pair<int, int>>> boundary_edges;
 
@@ -271,7 +272,7 @@ void MeshCreator::configure_mesh_generation(bool use_triangles) {
 }
 
 void MeshCreator::extract_mesh_data(
-    Eigen::MatrixXd& vertices, Eigen::MatrixXi& elements, Eigen::VectorXi& element_tags,
+    DView2& vertices, IView2& elements, IView1& element_tags,
     std::map<std::string, int>& boundary_tags,
     std::map<int, std::vector<std::pair<int, int>>>& boundary_edges) {
     // Get nodes
@@ -281,9 +282,9 @@ void MeshCreator::extract_mesh_data(
 
     gmsh::model::mesh::getNodes(node_tags, coords, parametric_coords);
 
-    // Convert nodes to Eigen format
-    int n_nodes = node_tags.size();
-    vertices.resize(n_nodes, 2);
+    // Convert nodes to view format
+    int n_nodes = static_cast<int>(node_tags.size());
+    vertices = DView2("vertices", n_nodes, 2);
     std::map<std::size_t, int> node_map;
 
     for (int i = 0; i < n_nodes; ++i) {
@@ -310,10 +311,10 @@ void MeshCreator::extract_mesh_data(
         throw std::runtime_error("Unsupported element type: " + std::to_string(elem_type));
     }
 
-    // Convert elements to Eigen format
-    int n_elements = elem_tags_vec[0].size();
-    elements.resize(n_elements, n_nodes_per_elem);
-    element_tags.resize(n_elements);
+    // Convert elements to view format
+    int n_elements = static_cast<int>(elem_tags_vec[0].size());
+    elements = IView2("elements", n_elements, n_nodes_per_elem);
+    element_tags = IView1("element_tags", n_elements);
 
     for (int i = 0; i < n_elements; ++i) {
         element_tags[i] = elem_tags_vec[0][i];
@@ -368,59 +369,71 @@ void MeshCreator::extract_mesh_data(
     }
 }
 
-std::optional<Eigen::Vector2d> find_reference_coords(const Eigen::Vector2d& x_phys,
-                                                     const Eigen::MatrixXd& vertices,
-                                                     std::string_view element_type, double tol,
-                                                     int max_iter) {
+std::optional<Vec2> find_reference_coords(const Vec2& x_phys, const DView2& vertices,
+                                          std::string_view element_type, double tol, int max_iter) {
     // Newton iteration to find reference coordinates
-    Eigen::Vector2d xi = Eigen::Vector2d::Zero();  // Initial guess
+    Vec2 xi = Vec2{0.0, 0.0};  // Initial guess
 
     for (int iter = 0; iter < max_iter; ++iter) {
-        Eigen::Vector2d x_mapped;
-        Eigen::Matrix2d J;
+        Vec2 x_mapped;
+        Mat2 J{};
 
         if (element_type == "triangle") {
             // Triangle mapping: x = v0*(1-xi-eta) + v1*xi + v2*eta
-            x_mapped = vertices.row(0) * (1.0 - xi[0] - xi[1]) + vertices.row(1) * xi[0] +
-                       vertices.row(2) * xi[1];
+            Vec2 v0 = row2(vertices, 0);
+            Vec2 v1 = row2(vertices, 1);
+            Vec2 v2 = row2(vertices, 2);
+            x_mapped = v0 * (1.0 - xi[0] - xi[1]) + v1 * xi[0] + v2 * xi[1];
 
-            J.col(0) = vertices.row(1) - vertices.row(0);
-            J.col(1) = vertices.row(2) - vertices.row(0);
+            Vec2 col0 = v1 - v0;
+            Vec2 col1 = v2 - v0;
+            J = Mat2{col0[0], col1[0], col0[1], col1[1]};
 
         } else if (element_type == "quad") {
             // Bilinear quad mapping
             double xi_val = xi[0], eta_val = xi[1];
-            Eigen::Vector4d N;
+            Vec4 N;
             N[0] = 0.25 * (1.0 - xi_val) * (1.0 - eta_val);
             N[1] = 0.25 * (1.0 + xi_val) * (1.0 - eta_val);
             N[2] = 0.25 * (1.0 + xi_val) * (1.0 + eta_val);
             N[3] = 0.25 * (1.0 - xi_val) * (1.0 + eta_val);
 
-            x_mapped = vertices.transpose() * N;
+            x_mapped = Vec2{0.0, 0.0};
+            for (int i = 0; i < 4; ++i) {
+                x_mapped = x_mapped + row2(vertices, i) * N[i];
+            }
 
-            Eigen::Matrix<double, 4, 2> dN_dxi;
-            dN_dxi(0, 0) = -0.25 * (1.0 - eta_val);
-            dN_dxi(0, 1) = -0.25 * (1.0 - xi_val);
-            dN_dxi(1, 0) = 0.25 * (1.0 - eta_val);
-            dN_dxi(1, 1) = -0.25 * (1.0 + xi_val);
-            dN_dxi(2, 0) = 0.25 * (1.0 + eta_val);
-            dN_dxi(2, 1) = 0.25 * (1.0 + xi_val);
-            dN_dxi(3, 0) = -0.25 * (1.0 + eta_val);
-            dN_dxi(3, 1) = 0.25 * (1.0 - xi_val);
+            double dN_dxi[4][2];
+            dN_dxi[0][0] = -0.25 * (1.0 - eta_val);
+            dN_dxi[0][1] = -0.25 * (1.0 - xi_val);
+            dN_dxi[1][0] = 0.25 * (1.0 - eta_val);
+            dN_dxi[1][1] = -0.25 * (1.0 + xi_val);
+            dN_dxi[2][0] = 0.25 * (1.0 + eta_val);
+            dN_dxi[2][1] = 0.25 * (1.0 + xi_val);
+            dN_dxi[3][0] = -0.25 * (1.0 + eta_val);
+            dN_dxi[3][1] = 0.25 * (1.0 - xi_val);
 
-            J = vertices.transpose() * dN_dxi;
+            // J = vertices^T * dN_dxi, a (2x4)*(4x2) contraction.
+            double j00 = 0.0, j01 = 0.0, j10 = 0.0, j11 = 0.0;
+            for (int i = 0; i < 4; ++i) {
+                j00 += vertices(i, 0) * dN_dxi[i][0];
+                j01 += vertices(i, 0) * dN_dxi[i][1];
+                j10 += vertices(i, 1) * dN_dxi[i][0];
+                j11 += vertices(i, 1) * dN_dxi[i][1];
+            }
+            J = Mat2{j00, j01, j10, j11};
         } else {
             throw std::invalid_argument("Unknown element type: " + std::string(element_type));
         }
 
-        Eigen::Vector2d residual = x_mapped - x_phys;
+        Vec2 residual = x_mapped - x_phys;
 
-        if (residual.norm() < tol) {
+        if (norm(residual) < tol) {
             return xi;
         }
 
         // Newton update
-        xi -= J.inverse() * residual;
+        xi = xi - J.inverse().apply(residual);
 
         // Project to reference element bounds
         if (element_type == "triangle") {

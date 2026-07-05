@@ -21,12 +21,12 @@ DGSolution::DGSolution(int n_elements, int n_basis, int n_variables)
     }
 }
 
-Eigen::MatrixXd DGSolution::get_element_coeffs(int elem_id) const {
+DView2 DGSolution::get_element_coeffs(int elem_id) const {
     if (elem_id < 0 || elem_id >= n_elements_) {
         throw std::out_of_range("Element index out of range");
     }
 
-    Eigen::MatrixXd coeffs(n_basis_, n_variables_);
+    DView2 coeffs("element_coeffs", n_basis_, n_variables_);
     for (int basis = 0; basis < n_basis_; ++basis) {
         for (int var = 0; var < n_variables_; ++var) {
             coeffs(basis, var) = coeffs_[elem_id][basis][var];
@@ -35,11 +35,12 @@ Eigen::MatrixXd DGSolution::get_element_coeffs(int elem_id) const {
     return coeffs;
 }
 
-void DGSolution::set_element_coeffs(int elem_id, const Eigen::MatrixXd& coeffs) {
+void DGSolution::set_element_coeffs(int elem_id, const DView2& coeffs) {
     if (elem_id < 0 || elem_id >= n_elements_) {
         throw std::out_of_range("Element index out of range");
     }
-    if (coeffs.rows() != n_basis_ || coeffs.cols() != n_variables_) {
+    if (static_cast<int>(coeffs.extent(0)) != n_basis_ ||
+        static_cast<int>(coeffs.extent(1)) != n_variables_) {
         throw std::invalid_argument("Coefficient matrix size mismatch");
     }
 
@@ -50,7 +51,7 @@ void DGSolution::set_element_coeffs(int elem_id, const Eigen::MatrixXd& coeffs) 
     }
 }
 
-Eigen::VectorXd DGSolution::get_element_coeffs(int elem_id, int var_id) const {
+DView1 DGSolution::get_element_coeffs(int elem_id, int var_id) const {
     if (elem_id < 0 || elem_id >= n_elements_) {
         throw std::out_of_range("Element index out of range");
     }
@@ -58,21 +59,21 @@ Eigen::VectorXd DGSolution::get_element_coeffs(int elem_id, int var_id) const {
         throw std::out_of_range("Variable index out of range");
     }
 
-    Eigen::VectorXd coeffs(n_basis_);
+    DView1 coeffs("element_coeffs_var", n_basis_);
     for (int basis = 0; basis < n_basis_; ++basis) {
         coeffs[basis] = coeffs_[elem_id][basis][var_id];
     }
     return coeffs;
 }
 
-void DGSolution::set_element_coeffs(int elem_id, int var_id, const Eigen::VectorXd& coeffs) {
+void DGSolution::set_element_coeffs(int elem_id, int var_id, const DView1& coeffs) {
     if (elem_id < 0 || elem_id >= n_elements_) {
         throw std::out_of_range("Element index out of range");
     }
     if (var_id < 0 || var_id >= n_variables_) {
         throw std::out_of_range("Variable index out of range");
     }
-    if (coeffs.size() != n_basis_) {
+    if (static_cast<int>(coeffs.extent(0)) != n_basis_) {
         throw std::invalid_argument("Coefficient vector size mismatch");
     }
 
@@ -81,8 +82,8 @@ void DGSolution::set_element_coeffs(int elem_id, int var_id, const Eigen::Vector
     }
 }
 
-Eigen::VectorXd DGSolution::get_global_coeffs() const {
-    Eigen::VectorXd global_coeffs(get_total_dofs());
+DView1 DGSolution::get_global_coeffs() const {
+    DView1 global_coeffs("global_coeffs", get_total_dofs());
 
     for (int elem = 0; elem < n_elements_; ++elem) {
         for (int basis = 0; basis < n_basis_; ++basis) {
@@ -96,12 +97,12 @@ Eigen::VectorXd DGSolution::get_global_coeffs() const {
     return global_coeffs;
 }
 
-void DGSolution::set_global_coeffs(const Eigen::VectorXd& coeffs) {
-    if (coeffs.size() != get_total_dofs()) {
+void DGSolution::set_global_coeffs(const DView1& coeffs) {
+    if (static_cast<int>(coeffs.extent(0)) != get_total_dofs()) {
         throw std::invalid_argument("Global coefficient vector size mismatch");
     }
 
-    for (int flat_idx = 0; flat_idx < coeffs.size(); ++flat_idx) {
+    for (int flat_idx = 0; flat_idx < static_cast<int>(coeffs.extent(0)); ++flat_idx) {
         auto [elem, basis, var] = flat_to_indices(flat_idx);
         coeffs_[elem][basis][var] = coeffs[flat_idx];
     }

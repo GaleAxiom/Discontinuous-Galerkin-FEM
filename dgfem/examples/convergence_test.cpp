@@ -3,6 +3,7 @@
  * @brief Test h-convergence and p-convergence for Laplace DG solver
  */
 
+#include <Kokkos_Core.hpp>
 #include <cmath>
 
 #include <iomanip>
@@ -11,12 +12,11 @@
 #include <vector>
 
 // Include DGFEM headers
-#include "dgfem/boundary/conditions.hpp"
 #include "dgfem/config/config.hpp"
 #include "dgfem/core/mesh.hpp"
 #include "dgfem/core/space.hpp"
 #include "dgfem/solver/dg_solver.hpp"
-#include "dgfem/utils/mesh_creation.hpp"
+#include "dgfem/utils/example_helpers.hpp"
 
 // Structure to store convergence results
 struct ConvergenceResult {
@@ -33,7 +33,8 @@ void run_p_convergence(double fixed_dx, ConvergenceResult& result);
 void print_final_summary(const std::vector<ConvergenceResult>& h_results,
                          const std::vector<ConvergenceResult>& p_results);
 
-int main() {
+int main(int argc, char** argv) {
+    Kokkos::ScopeGuard kokkos_guard(argc, argv);
     try {
         std::cout << "=== DGFEM Convergence Study: h-refinement and p-refinement ===" << std::endl;
 
@@ -90,28 +91,22 @@ void run_h_convergence(int fixed_order, ConvergenceResult& result) {
     result.dx = -1;  // Not applicable for h-convergence
 
     auto& config = dgfem::Config::instance();
-    config.use_triangles = true;
-    config.order = fixed_order;
-    config.xmin = 0.0;
-    config.xmax = 1.0;
-    config.ymin = 0.0;
-    config.ymax = 1.0;
     config.sigma = 10.0;
 
     // Define exact solution: u(x,y) = sin(πx)sin(πy)
-    auto source_function = [](const Eigen::Vector2d& x) -> double {
+    auto source_function = [](const dgfem::Vec2& x) -> double {
         const double pi = M_PI;
         return 2.0 * pi * pi * std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
-    auto exact_solution = [](const Eigen::Vector2d& x) -> double {
+    auto exact_solution = [](const dgfem::Vec2& x) -> double {
         const double pi = M_PI;
         return std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
-    auto exact_gradient = [](const Eigen::Vector2d& x) -> Eigen::Vector2d {
+    auto exact_gradient = [](const dgfem::Vec2& x) -> dgfem::Vec2 {
         const double pi = M_PI;
-        Eigen::Vector2d grad;
+        dgfem::Vec2 grad;
         grad[0] = pi * std::cos(pi * x[0]) * std::sin(pi * x[1]);
         grad[1] = pi * std::sin(pi * x[0]) * std::cos(pi * x[1]);
         return grad;
@@ -120,29 +115,19 @@ void run_h_convergence(int fixed_order, ConvergenceResult& result) {
     std::vector<double> dx_values = {1.0 / 2.0, 1.0 / 4.0, 1.0 / 8.0, 1.0 / 16.0, 1.0 / 32.0};
 
     for (double dx : dx_values) {
-        config.dx = dx;
         result.mesh_sizes_or_orders.push_back(dx);
 
-        // Create mesh
-        auto mesh = dgfem::MeshCreator::create_rectangular_mesh(
-            config.dx, config.use_triangles, config.xmin, config.xmax, config.ymin, config.ymax);
-
-        // Create DG space
-        auto dg_space = std::make_shared<dgfem::DGSpace>(mesh->get_element_type(), config.order);
-
-        // Initialize mesh with DG space
-        mesh->initialize_dg_space(dg_space, 1);
+        // Create mesh + DG space (1 variable for scalar Laplace)
+        auto mesh = dgfem::MeshSetup::create_standard_mesh(/*use_triangles=*/true, fixed_order, dx,
+                                                           /*n_vars=*/1, 0.0, 1.0, 0.0, 1.0);
+        auto dg_space = mesh->get_dg_space();
 
         // Set up boundary conditions (homogeneous Dirichlet)
-        auto bc_zero = dgfem::make_dirichlet_bc(0.0);
-        mesh->set_boundary_condition("Bottom", bc_zero);
-        mesh->set_boundary_condition("Top", bc_zero);
-        mesh->set_boundary_condition("Left", bc_zero);
-        mesh->set_boundary_condition("Right", bc_zero);
+        dgfem::set_rectangle_dirichlet_bc(mesh, 0.0);
 
         // Create solver and solve
         dgfem::LaplaceDGSolver solver(mesh, config.sigma);
-        Eigen::VectorXd solution = solver.solve(source_function);
+        dgfem::DView1 solution = solver.solve(source_function);
 
         // Compute errors
         auto errors = solver.compute_error(exact_solution, exact_gradient);
@@ -195,57 +180,41 @@ void run_p_convergence(double fixed_dx, ConvergenceResult& result) {
     result.dx = fixed_dx;
 
     auto& config = dgfem::Config::instance();
-    config.use_triangles = true;
-    config.dx = fixed_dx;
-    config.xmin = 0.0;
-    config.xmax = 1.0;
-    config.ymin = 0.0;
-    config.ymax = 1.0;
     config.sigma = 10.0;
 
     // Define exact solution: u(x,y) = sin(πx)sin(πy)
-    auto source_function = [](const Eigen::Vector2d& x) -> double {
+    auto source_function = [](const dgfem::Vec2& x) -> double {
         const double pi = M_PI;
         return 2.0 * pi * pi * std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
-    auto exact_solution = [](const Eigen::Vector2d& x) -> double {
+    auto exact_solution = [](const dgfem::Vec2& x) -> double {
         const double pi = M_PI;
         return std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
-    auto exact_gradient = [](const Eigen::Vector2d& x) -> Eigen::Vector2d {
+    auto exact_gradient = [](const dgfem::Vec2& x) -> dgfem::Vec2 {
         const double pi = M_PI;
-        Eigen::Vector2d grad;
+        dgfem::Vec2 grad;
         grad[0] = pi * std::cos(pi * x[0]) * std::sin(pi * x[1]);
         grad[1] = pi * std::sin(pi * x[0]) * std::cos(pi * x[1]);
         return grad;
     };
 
     for (int p = 1; p <= 7; ++p) {
-        config.order = p;
         result.mesh_sizes_or_orders.push_back(static_cast<double>(p));
 
-        // Create mesh
-        auto mesh = dgfem::MeshCreator::create_rectangular_mesh(
-            config.dx, config.use_triangles, config.xmin, config.xmax, config.ymin, config.ymax);
-
-        // Create DG space
-        auto dg_space = std::make_shared<dgfem::DGSpace>(mesh->get_element_type(), config.order);
-
-        // Initialize mesh with DG space
-        mesh->initialize_dg_space(dg_space, 1);
+        // Create mesh + DG space (1 variable for scalar Laplace)
+        auto mesh = dgfem::MeshSetup::create_standard_mesh(/*use_triangles=*/true, p, fixed_dx,
+                                                           /*n_vars=*/1, 0.0, 1.0, 0.0, 1.0);
+        auto dg_space = mesh->get_dg_space();
 
         // Set up boundary conditions (homogeneous Dirichlet)
-        auto bc_zero = dgfem::make_dirichlet_bc(0.0);
-        mesh->set_boundary_condition("Bottom", bc_zero);
-        mesh->set_boundary_condition("Top", bc_zero);
-        mesh->set_boundary_condition("Left", bc_zero);
-        mesh->set_boundary_condition("Right", bc_zero);
+        dgfem::set_rectangle_dirichlet_bc(mesh, 0.0);
 
         // Create solver and solve
         dgfem::LaplaceDGSolver solver(mesh, config.sigma);
-        Eigen::VectorXd solution = solver.solve(source_function);
+        dgfem::DView1 solution = solver.solve(source_function);
 
         // Compute errors
         auto errors = solver.compute_error(exact_solution, exact_gradient);

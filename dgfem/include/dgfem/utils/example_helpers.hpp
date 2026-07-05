@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "dgfem/boundary/conditions.hpp"
 #include "dgfem/config/config.hpp"
 #include "dgfem/core/mesh.hpp"
 #include "dgfem/core/space.hpp"
@@ -15,6 +16,7 @@
 
 #include <chrono>
 #include <iomanip>
+#include <ios>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -43,8 +45,16 @@ public:
         auto duration =
             std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_)
                 .count();
+        // Save/restore std::cout's format flags and precision: std::fixed/setprecision are
+        // sticky on the stream, not scoped to this statement, so without this a caller's
+        // later output (e.g. scientific-notation error norms) would silently inherit
+        // "fixed, 4 decimal places" from here.
+        std::ios::fmtflags saved_flags(std::cout.flags());
+        std::streamsize saved_precision(std::cout.precision());
         std::cout << "[TIMER] " << label_ << " took " << std::fixed << std::setprecision(4)
                   << duration << " seconds" << std::endl;
+        std::cout.flags(saved_flags);
+        std::cout.precision(saved_precision);
     }
 
     /**
@@ -107,8 +117,8 @@ public:
     static std::shared_ptr<DGMesh>
     create_cylinder_channel_mesh(int order, double dx_channel, double dx_cylinder, int n_vars = 4,
                                  double length = 2.2, double height = 0.41,
-                                 const Eigen::Vector2d& center = Eigen::Vector2d(0.2, 0.2),
-                                 double radius = 0.05, bool use_triangles = true) {
+                                 const Vec2& center = Vec2{0.2, 0.2}, double radius = 0.05,
+                                 bool use_triangles = true) {
         MeshCreator::initialize_gmsh();
 
         auto& config = Config::instance();
@@ -137,7 +147,7 @@ public:
         std::cout << "\n--- Mesh Information ---" << std::endl;
         std::cout << "  Element type: " << mesh->get_element_type() << std::endl;
         std::cout << "  Number of elements: " << mesh->get_n_elements() << std::endl;
-        std::cout << "  Number of vertices: " << mesh->get_vertices().rows() << std::endl;
+        std::cout << "  Number of vertices: " << mesh->get_vertices().extent(0) << std::endl;
         std::cout << "  Polynomial order: " << dg_space->get_basis()->get_order() << std::endl;
         std::cout << "  Basis functions per element: " << dg_space->get_basis()->get_n_basis()
                   << std::endl;
@@ -147,5 +157,17 @@ public:
                   << std::endl;
     }
 };
+
+/**
+ * @brief Set the same homogeneous (or constant-value) Dirichlet BC on all four sides
+ * of a rectangular mesh's boundary tags (Bottom/Top/Left/Right).
+ */
+inline void set_rectangle_dirichlet_bc(const std::shared_ptr<DGMesh>& mesh, double value = 0.0) {
+    auto bc = make_dirichlet_bc(value);
+    mesh->set_boundary_condition("Bottom", bc);
+    mesh->set_boundary_condition("Top", bc);
+    mesh->set_boundary_condition("Left", bc);
+    mesh->set_boundary_condition("Right", bc);
+}
 
 }  // namespace dgfem

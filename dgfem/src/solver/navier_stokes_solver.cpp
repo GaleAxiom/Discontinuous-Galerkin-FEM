@@ -13,9 +13,8 @@ NavierStokesDGSolver::NavierStokesDGSolver(std::shared_ptr<DGMesh> mesh, double 
                                    gamma, dynamic_viscosity, prandtl, penalty_prefactor),
                                "Navier-Stokes") {}
 
-std::vector<Eigen::MatrixXd> NavierStokesDGSolver::solve(
-    std::function<Eigen::Vector4d(const Eigen::Vector2d&)> initial_condition, double T_final,
-    double dt, int save_every) {
+std::vector<DView2> NavierStokesDGSolver::solve(std::function<Vec4(const Vec2&)> initial_condition,
+                                                double T_final, double dt, int save_every) {
     return run_time_integration(std::move(initial_condition), T_final, dt, save_every);
 }
 

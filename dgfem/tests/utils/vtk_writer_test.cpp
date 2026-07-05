@@ -56,12 +56,12 @@ TEST_F(VTKWriterTest, WriteSimpleTriangleSolution) {
     mesh->set_boundary_condition("Left", bc_zero);
     mesh->set_boundary_condition("Right", bc_zero);
 
-    auto source_func = [](const Eigen::Vector2d& x) -> double {
+    auto source_func = [](const dgfem::Vec2& x) -> double {
         return 2.0 * (x[1] * (1 - x[1]) + x[0] * (1 - x[0]));
     };
 
     LaplaceDGSolver solver(mesh, 10.0);
-    Eigen::VectorXd solution = solver.solve(source_func);
+    dgfem::DView1 solution = solver.solve(source_func);
 
     std::string filename = "test_triangle_solution";
     VTKWriter::write_solution(mesh, solution, filename, "u", 3);
@@ -81,10 +81,10 @@ TEST_F(VTKWriterTest, WriteQuadSolution) {
     mesh->set_boundary_condition("Left", bc_zero);
     mesh->set_boundary_condition("Right", bc_zero);
 
-    auto source_func = [](const Eigen::Vector2d& x) -> double { return 1.0; };
+    auto source_func = [](const dgfem::Vec2& x) -> double { return 1.0; };
 
     LaplaceDGSolver solver(mesh, 10.0);
-    Eigen::VectorXd solution = solver.solve(source_func);
+    dgfem::DView1 solution = solver.solve(source_func);
 
     std::string filename = "test_quad_solution";
     VTKWriter::write_solution(mesh, solution, filename, "temperature", 3);

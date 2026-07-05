@@ -15,6 +15,7 @@
 #include "dgfem/utils/example_helpers.hpp"
 #include "dgfem/utils/vtk_writer.hpp"
 
+#include <Kokkos_Core.hpp>
 #include <cmath>
 #include <filesystem>
 
@@ -30,13 +31,11 @@ namespace {
 struct ShearFlowAnalytic {
     double gamma;
 
-    [[nodiscard]] Eigen::Vector4d primitive(const Eigen::Vector2d& x) const {
-        Eigen::Vector4d W;
-        W << 1.0, x[1], 0.0, 1.0;
-        return W;
+    [[nodiscard]] dgfem::Vec4 primitive(const dgfem::Vec2& x) const {
+        return dgfem::Vec4{1.0, x[1], 0.0, 1.0};
     }
 
-    [[nodiscard]] Eigen::Vector4d conserved(const Eigen::Vector2d& x) const {
+    [[nodiscard]] dgfem::Vec4 conserved(const dgfem::Vec2& x) const {
         return dgfem::primitive_to_conserved(primitive(x), gamma);
     }
 };
@@ -45,7 +44,7 @@ struct ShearFlowAnalytic {
  * @brief Compute an L2-like error for a primitive variable against the analytic state.
  */
 double compute_variable_error(const std::shared_ptr<dgfem::DGMesh>& mesh,
-                              const Eigen::MatrixXd& numerical_sol, const ShearFlowAnalytic& exact,
+                              const dgfem::DView2& numerical_sol, const ShearFlowAnalytic& exact,
                               double gamma, int var_idx) {
     auto space = mesh->get_dg_space();
     auto mapping = space->get_mapping();
@@ -59,27 +58,24 @@ double compute_variable_error(const std::shared_ptr<dgfem::DGMesh>& mesh,
 
     for (int elem = 0; elem < mesh->get_n_elements(); ++elem) {
         const auto& elem_data = mesh->get_element_data(elem);
-        const Eigen::VectorXd& J_det = elem_data.at("J_det_vol");
+        const dgfem::DView2& J_det = elem_data.at("J_det_vol");
 
-        Eigen::MatrixXd vertices(mesh->get_elements().cols(), 2);
-        for (int i = 0; i < vertices.rows(); ++i) {
-            vertices.row(i) = mesh->get_vertices().row(mesh->get_elements()(elem, i));
-        }
+        dgfem::DView2 vertices = mesh->get_element_vertices(elem);
 
-        for (int q = 0; q < quad_wts.size(); ++q) {
-            Eigen::Vector2d x_phys = mapping->map_to_physical(vertices, quad_pts.row(q));
+        for (int q = 0; q < static_cast<int>(quad_wts.size()); ++q) {
+            dgfem::Vec2 x_phys = mapping->map_to_physical(vertices, dgfem::row2(quad_pts, q));
 
-            Eigen::Vector4d U_num = Eigen::Vector4d::Zero();
+            dgfem::Vec4 U_num{0.0, 0.0, 0.0, 0.0};
             for (int i = 0; i < n_basis; ++i) {
                 for (int v = 0; v < 4; ++v) {
                     U_num[v] += numerical_sol(elem, i * 4 + v) * phi(q, i);
                 }
             }
 
-            Eigen::Vector4d W_num = dgfem::conserved_to_primitive(U_num, gamma);
-            Eigen::Vector4d W_exact = exact.primitive(x_phys);
+            dgfem::Vec4 W_num = dgfem::conserved_to_primitive(U_num, gamma);
+            dgfem::Vec4 W_exact = exact.primitive(x_phys);
 
-            double weight = quad_wts(q) * std::abs(J_det(q));
+            double weight = quad_wts(q) * std::abs(J_det(q, 0));
             double diff = W_num[var_idx] - W_exact[var_idx];
             error_sq += diff * diff * weight;
             norm_sq += W_exact[var_idx] * W_exact[var_idx] * weight;
@@ -94,7 +90,8 @@ double compute_variable_error(const std::shared_ptr<dgfem::DGMesh>& mesh,
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    Kokkos::ScopeGuard kokkos_guard(argc, argv);
     try {
         std::cout << "=== DGFEM Navier-Stokes Shear Flow Example ===" << std::endl;
 
@@ -121,7 +118,7 @@ int main() {
         // Apply shear-consistent far-field boundary conditions on all faces
         auto shear_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
             dgfem::BCTypeEuler::FAR_FIELD,
-            [exact](const Eigen::Vector2d& x) { return exact.conserved(x); });
+            [exact](const dgfem::Vec2& x) { return exact.conserved(x); });
         for (const auto& [name, _] : mesh->get_boundary_tags()) {
             mesh->set_boundary_condition_euler(name, shear_bc);
         }
@@ -140,9 +137,8 @@ int main() {
 
         dgfem::Timer solve_timer("Shear flow solve");
         dgfem::NavierStokesDGSolver solver(mesh, gamma, mu, prandtl, penalty);
-        auto solutions =
-            solver.solve([exact](const Eigen::Vector2d& x) { return exact.conserved(x); }, T_final,
-                         dt, save_every);
+        auto solutions = solver.solve([exact](const dgfem::Vec2& x) { return exact.conserved(x); },
+                                      T_final, dt, save_every);
 
         if (solutions.empty()) {
             throw std::runtime_error("Navier-Stokes solver did not return any solution frames.");

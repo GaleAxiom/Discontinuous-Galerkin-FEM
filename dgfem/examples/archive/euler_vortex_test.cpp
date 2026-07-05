@@ -11,6 +11,7 @@
 #include "dgfem/utils/example_helpers.hpp"
 #include "dgfem/utils/vtk_writer.hpp"
 
+#include <Kokkos_Core.hpp>
 #include <cmath>
 
 #include <iostream>
@@ -24,7 +25,7 @@
 auto create_vortex_initial_condition(double gamma, double x_c, double y_c, double R, double sigma,
                                      double alpha, double beta, double M_inf, double u_inf,
                                      double v_inf) {
-    return [=](const Eigen::Vector2d& x) -> Eigen::Vector4d {
+    return [=](const dgfem::Vec2& x) -> dgfem::Vec4 {
         // Compute vortex perturbation based on distance from center
         double dx = x[0] - x_c;
         double dy = x[1] - y_c;
@@ -44,11 +45,12 @@ auto create_vortex_initial_condition(double gamma, double x_c, double y_c, doubl
         double v = M_inf * std::sin(alpha) + dv + v_inf;
         double p = (1.0 / gamma) * std::pow(1.0 + dT, gamma / (gamma - 1.0));
 
-        return dgfem::primitive_to_conserved(Eigen::Vector4d(rho, u, v, p), gamma);
+        return dgfem::primitive_to_conserved(dgfem::Vec4{rho, u, v, p}, gamma);
     };
 }
 
-int main() {
+int main(int argc, char** argv) {
+    Kokkos::ScopeGuard kokkos_guard(argc, argv);
     try {
         std::cout << "=== DGFEM C++ Euler Vortex Test ===" << std::endl;
 

@@ -14,7 +14,7 @@ namespace dgfem {
  */
 class AdvectionWeakFormulation : public TimeDependentWeakFormulation {
 public:
-    explicit AdvectionWeakFormulation(const Eigen::Vector2d& velocity);
+    explicit AdvectionWeakFormulation(const Vec2& velocity);
     ~AdvectionWeakFormulation() override = default;
 
     // Delete copy, default move
@@ -29,27 +29,26 @@ public:
     /**
      * @brief Volume (stiffness) integral (implements base class method)
      */
-    [[nodiscard]] Eigen::MatrixXd
-    compute_volume_integral(const std::map<std::string, Eigen::MatrixXd>& elem_data,
-                            std::shared_ptr<DGSpace> dg_space) const override;
+    [[nodiscard]] DView2 compute_volume_integral(const std::map<std::string, DView2>& elem_data,
+                                                 std::shared_ptr<DGSpace> dg_space) const override;
 
     /**
      * @brief Interior face integral (implements base class method)
      */
-    [[nodiscard]] std::tuple<Eigen::MatrixXd, Eigen::MatrixXd, Eigen::MatrixXd, Eigen::MatrixXd>
-    compute_interior_face_integral(
-        int elem_L, int face_L, int elem_R, int face_R, std::shared_ptr<DGMesh> mesh,
-        const Eigen::VectorXi& permutation = Eigen::VectorXi()) const override;
+    [[nodiscard]] std::tuple<DView2, DView2, DView2, DView2>
+    compute_interior_face_integral(int elem_L, int face_L, int elem_R, int face_R,
+                                   std::shared_ptr<DGMesh> mesh,
+                                   const IView1& permutation = IView1()) const override;
 
     /**
      * @brief Boundary face integral (implements base class method)
      */
-    [[nodiscard]] std::tuple<Eigen::MatrixXd, Eigen::VectorXd> compute_boundary_face_integral(
-        int elem_id, int face_id, std::shared_ptr<DGMesh> mesh,
-        std::function<double(const Eigen::Vector2d&)> bc_func) const override;
+    [[nodiscard]] std::tuple<DView2, DView1>
+    compute_boundary_face_integral(int elem_id, int face_id, std::shared_ptr<DGMesh> mesh,
+                                   std::function<double(const Vec2&)> bc_func) const override;
 
 private:
-    Eigen::Vector2d beta_;  ///< Advection velocity
+    Vec2 beta_;  ///< Advection velocity
 };
 
 }  // namespace dgfem

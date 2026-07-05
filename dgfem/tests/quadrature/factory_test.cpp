@@ -1,6 +1,15 @@
-#include <Eigen/Dense>
 #include <cmath>
+#include <dgfem/kokkos_math.hpp>
 #include <dgfem/quadrature/factory.hpp>
+
+namespace {
+double weights_sum(const dgfem::DView1& w) {
+    double s = 0.0;
+    for (int i = 0; i < static_cast<int>(w.extent(0)); ++i)
+        s += w(i);
+    return s;
+}
+}  // namespace
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -12,8 +21,8 @@ TEST(QuadratureFactoryTest, GaussLegendre1D) {
     // Test 2-point rule
     auto rule_2pt = QuadratureFactory::gauss_legendre_1d(2);
 
-    ASSERT_EQ(rule_2pt->points.rows(), 2);
-    ASSERT_EQ(rule_2pt->points.cols(), 1);
+    ASSERT_EQ(rule_2pt->points.extent(0), 2);
+    ASSERT_EQ(rule_2pt->points.extent(1), 1);
     ASSERT_EQ(rule_2pt->weights.size(), 2);
 
     // Known values for 2-point rule
@@ -23,36 +32,36 @@ TEST(QuadratureFactoryTest, GaussLegendre1D) {
     EXPECT_NEAR(rule_2pt->weights(1), 1.0, 1e-12);
 
     // Test that weights sum to 2 (length of interval [-1,1])
-    EXPECT_NEAR(rule_2pt->weights.sum(), 2.0, 1e-12);
+    EXPECT_NEAR(weights_sum(rule_2pt->weights), 2.0, 1e-12);
 }
 
 TEST(QuadratureFactoryTest, GaussLegendreQuad) {
     // Test 2x2 rule
     auto rule_2x2 = QuadratureFactory::gauss_legendre_quad(2);
 
-    ASSERT_EQ(rule_2x2->points.rows(), 4);
-    ASSERT_EQ(rule_2x2->points.cols(), 2);
+    ASSERT_EQ(rule_2x2->points.extent(0), 4);
+    ASSERT_EQ(rule_2x2->points.extent(1), 2);
     ASSERT_EQ(rule_2x2->weights.size(), 4);
 
     // Known values for 2x2 tensor product
     double p = 1.0 / std::sqrt(3.0);
-    Eigen::Vector2d expected_points[] = {{-p, -p}, {p, -p}, {-p, p}, {p, p}};
+    Vec2 expected_points[] = {{-p, -p}, {p, -p}, {-p, p}, {p, p}};
 
     for (int i = 0; i < 4; ++i) {
-        EXPECT_NEAR(rule_2x2->points(i, 0), expected_points[i](0), 1e-12);
-        EXPECT_NEAR(rule_2x2->points(i, 1), expected_points[i](1), 1e-12);
+        EXPECT_NEAR(rule_2x2->points(i, 0), expected_points[i][0], 1e-12);
+        EXPECT_NEAR(rule_2x2->points(i, 1), expected_points[i][1], 1e-12);
         EXPECT_NEAR(rule_2x2->weights(i), 1.0, 1e-12);
     }
 
     // Test that weights sum to 4 (area of square [-1,1]²)
-    EXPECT_NEAR(rule_2x2->weights.sum(), 4.0, 1e-12);
+    EXPECT_NEAR(weights_sum(rule_2x2->weights), 4.0, 1e-12);
 }
 
 TEST(QuadratureFactoryTest, DunavantTriangleOrder1) {
     auto rule = QuadratureFactory::dunavant_triangle(1);
 
-    ASSERT_EQ(rule->points.rows(), 1);
-    ASSERT_EQ(rule->points.cols(), 2);
+    ASSERT_EQ(rule->points.extent(0), 1);
+    ASSERT_EQ(rule->points.extent(1), 2);
     ASSERT_EQ(rule->weights.size(), 1);
 
     // Order 1 rule is centroid with weight = area
@@ -61,7 +70,7 @@ TEST(QuadratureFactoryTest, DunavantTriangleOrder1) {
     EXPECT_NEAR(rule->weights(0), 0.5, 1e-12);
 
     // Test that weights sum to 0.5 (area of reference triangle)
-    EXPECT_NEAR(rule->weights.sum(), 0.5, 1e-12);
+    EXPECT_NEAR(weights_sum(rule->weights), 0.5, 1e-12);
 }
 
 TEST(QuadratureFactoryTest, DunavantTriangleHighOrder) {
@@ -70,7 +79,7 @@ TEST(QuadratureFactoryTest, DunavantTriangleHighOrder) {
         auto rule = QuadratureFactory::dunavant_triangle(order);
 
         // Check that points are inside reference triangle
-        for (int i = 0; i < rule->points.rows(); ++i) {
+        for (int i = 0; i < rule->points.extent(0); ++i) {
             double x = rule->points(i, 0);
             double y = rule->points(i, 1);
 
@@ -81,7 +90,7 @@ TEST(QuadratureFactoryTest, DunavantTriangleHighOrder) {
         }
 
         // Check that weights sum to area of reference triangle
-        EXPECT_NEAR(rule->weights.sum(), 0.5, 1e-12)
+        EXPECT_NEAR(weights_sum(rule->weights), 0.5, 1e-12)
             << "Weights don't sum to area for order " << order;
     }
 }
@@ -91,7 +100,7 @@ TEST(QuadratureFactoryTest, TensorProductTriangle) {
     auto rule = QuadratureFactory::dunavant_triangle(4);
 
     // Check that points are inside reference triangle
-    for (int i = 0; i < rule->points.rows(); ++i) {
+    for (int i = 0; i < rule->points.extent(0); ++i) {
         double x = rule->points(i, 0);
         double y = rule->points(i, 1);
 
@@ -101,7 +110,7 @@ TEST(QuadratureFactoryTest, TensorProductTriangle) {
     }
 
     // Check that weights sum to area of reference triangle
-    EXPECT_NEAR(rule->weights.sum(), 0.5, 1e-12);
+    EXPECT_NEAR(weights_sum(rule->weights), 0.5, 1e-12);
 }
 
 TEST(QuadratureFactoryTest, IntegrationAccuracy) {
@@ -109,7 +118,7 @@ TEST(QuadratureFactoryTest, IntegrationAccuracy) {
     auto test_polynomial = [](const std::unique_ptr<QuadratureRule>& rule, int poly_deg_x,
                               int poly_deg_y) -> double {
         double integral = 0.0;
-        for (int i = 0; i < rule->points.rows(); ++i) {
+        for (int i = 0; i < rule->points.extent(0); ++i) {
             double x = rule->points(i, 0);
             double y = rule->points(i, 1);
             double val = std::pow(x, poly_deg_x) * std::pow(y, poly_deg_y);
@@ -206,7 +215,7 @@ TEST(QuadratureFactoryTest, DegreeOfPrecision) {
     auto integrate_monomial_triangle = [](const std::unique_ptr<QuadratureRule>& rule, int deg_x,
                                           int deg_y) -> double {
         double sum = 0.0;
-        for (int i = 0; i < rule->points.rows(); ++i) {
+        for (int i = 0; i < rule->points.extent(0); ++i) {
             double x = rule->points(i, 0);
             double y = rule->points(i, 1);
             sum += rule->weights(i) * std::pow(x, deg_x) * std::pow(y, deg_y);
@@ -275,7 +284,7 @@ TEST(QuadratureFactoryTest, QuadratureConvergence) {
     // Approximate "exact" value using very high order quadrature
     auto exact_rule = QuadratureFactory::dunavant_triangle(5);
     double exact = 0.0;
-    for (int i = 0; i < exact_rule->points.rows(); ++i) {
+    for (int i = 0; i < exact_rule->points.extent(0); ++i) {
         double x = exact_rule->points(i, 0);
         double y = exact_rule->points(i, 1);
         exact += exact_rule->weights(i) * smooth_function(x, y);
@@ -286,7 +295,7 @@ TEST(QuadratureFactoryTest, QuadratureConvergence) {
     for (int order = 1; order <= 4; ++order) {
         auto rule = QuadratureFactory::dunavant_triangle(order);
         double approx = 0.0;
-        for (int i = 0; i < rule->points.rows(); ++i) {
+        for (int i = 0; i < rule->points.extent(0); ++i) {
             double x = rule->points(i, 0);
             double y = rule->points(i, 1);
             approx += rule->weights(i) * smooth_function(x, y);
@@ -304,7 +313,7 @@ TEST(QuadratureFactoryTest, TrianglePointsInDomain) {
     for (int order = 1; order <= 5; ++order) {
         auto rule = QuadratureFactory::dunavant_triangle(order);
 
-        for (int i = 0; i < rule->points.rows(); ++i) {
+        for (int i = 0; i < rule->points.extent(0); ++i) {
             double x = rule->points(i, 0);
             double y = rule->points(i, 1);
 
@@ -323,7 +332,7 @@ TEST(QuadratureFactoryTest, QuadPointsInDomain) {
     for (int n = 1; n <= 5; ++n) {
         auto rule = QuadratureFactory::gauss_legendre_quad(n);
 
-        for (int i = 0; i < rule->points.rows(); ++i) {
+        for (int i = 0; i < rule->points.extent(0); ++i) {
             double x = rule->points(i, 0);
             double y = rule->points(i, 1);
 
@@ -341,7 +350,7 @@ TEST(QuadratureFactoryTest, ConstantFunctionIntegration) {
     // Triangle: integral of 1 over reference triangle = area = 0.5
     for (int order = 1; order <= 5; ++order) {
         auto rule = QuadratureFactory::dunavant_triangle(order);
-        double integral = rule->weights.sum();
+        double integral = weights_sum(rule->weights);
         EXPECT_NEAR(integral, 0.5, 1e-14)
             << "Triangle constant integration failed for order " << order;
     }
@@ -349,14 +358,14 @@ TEST(QuadratureFactoryTest, ConstantFunctionIntegration) {
     // Quad: integral of 1 over [-1,1]^2 = area = 4
     for (int n = 1; n <= 5; ++n) {
         auto rule = QuadratureFactory::gauss_legendre_quad(n);
-        double integral = rule->weights.sum();
+        double integral = weights_sum(rule->weights);
         EXPECT_NEAR(integral, 4.0, 1e-14) << "Quad constant integration failed for order " << n;
     }
 
     // 1D: integral of 1 over [-1,1] = length = 2
     for (int n = 1; n <= 5; ++n) {
         auto rule = QuadratureFactory::gauss_legendre_1d(n);
-        double integral = rule->weights.sum();
+        double integral = weights_sum(rule->weights);
         EXPECT_NEAR(integral, 2.0, 1e-14) << "1D constant integration failed for order " << n;
     }
 }
@@ -368,7 +377,7 @@ TEST(QuadratureFactoryTest, LinearFunctionIntegration) {
                                         double b, double c) -> double {
         // Integrate f(x,y) = a*x + b*y + c
         double sum = 0.0;
-        for (int i = 0; i < rule->points.rows(); ++i) {
+        for (int i = 0; i < rule->points.extent(0); ++i) {
             double x = rule->points(i, 0);
             double y = rule->points(i, 1);
             sum += rule->weights(i) * (a * x + b * y + c);
@@ -411,7 +420,7 @@ TEST(QuadratureFactoryTest, QuadraticFunctionIntegration) {
                                   double b) -> double {
         // Integrate f(x,y) = x^2 + y^2 + a*x*y + b
         double sum = 0.0;
-        for (int i = 0; i < rule->points.rows(); ++i) {
+        for (int i = 0; i < rule->points.extent(0); ++i) {
             double x = rule->points(i, 0);
             double y = rule->points(i, 1);
             sum += rule->weights(i) * (x * x + y * y + a * x * y + b);

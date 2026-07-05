@@ -20,7 +20,7 @@ LaplaceDGSolver::LaplaceDGSolver(std::shared_ptr<DGMesh> mesh, double penalty_pa
     log(Stage::Setup, oss.str());
 }
 
-Eigen::VectorXd LaplaceDGSolver::solve(std::function<double(const Eigen::Vector2d&)> source_func) {
+DView1 LaplaceDGSolver::solve(std::function<double(const Vec2&)> source_func) {
     begin_stage(Stage::Assembly);
     assembler_->assemble(source_func);
     end_stage(Stage::Assembly);
@@ -50,10 +50,10 @@ Eigen::VectorXd LaplaceDGSolver::solve(std::function<double(const Eigen::Vector2
 
     end_stage(Stage::Solve);
 
-    Eigen::VectorXd solution = tpetra_to_eigen(*x);
+    DView1 solution = tpetra_to_view(*x);
 
     std::ostringstream oss;
-    oss << "Solver converged. Solution norm = " << solution.norm();
+    oss << "Solver converged. Solution norm = " << norm(solution);
     log(Stage::Solve, oss.str());
 
     assembler_->distribute_solution(*x);
@@ -70,9 +70,9 @@ Teuchos::RCP<const TpetraMultiVector> LaplaceDGSolver::get_rhs() const noexcept 
     return assembler_->get_rhs();
 }
 
-std::map<std::string, double> LaplaceDGSolver::compute_error(
-    std::function<double(const Eigen::Vector2d&)> exact_solution,
-    std::function<Eigen::Vector2d(const Eigen::Vector2d&)> exact_gradient) const {
+std::map<std::string, double>
+LaplaceDGSolver::compute_error(std::function<double(const Vec2&)> exact_solution,
+                               std::function<Vec2(const Vec2&)> exact_gradient) const {
     begin_stage(Stage::Postprocess);
 
     double L2_error_sq = 0.0;
@@ -84,42 +84,39 @@ std::map<std::string, double> LaplaceDGSolver::compute_error(
 
     for (int elem_id = 0; elem_id < mesh_->get_n_elements(); ++elem_id) {
         const auto& elem_data = mesh_->get_element_data(elem_id);
-        Eigen::VectorXd elem_coeffs = mesh_solution->get_element_coeffs(elem_id, 0);
+        DView1 elem_coeffs = mesh_solution->get_element_coeffs(elem_id, 0);
 
-        Eigen::MatrixXd vertices(mesh_->get_elements().cols(), 2);
-        for (int i = 0; i < mesh_->get_elements().cols(); ++i) {
-            vertices.row(i) = mesh_->get_vertices().row(mesh_->get_elements()(elem_id, i));
-        }
+        DView2 vertices = mesh_->get_element_vertices(elem_id);
 
-        const Eigen::VectorXd& weights = dg_space->get_volume_quad()->weights;
-        const Eigen::VectorXd& J_det = elem_data.at("J_det_vol");
-        const Eigen::MatrixXd& phi = dg_space->get_volume_basis_values();
-        const Eigen::MatrixXd& dphi_dx = elem_data.at("dphi_dx_vol");
+        const DView1& weights = dg_space->get_volume_quad()->weights;
+        const DView2& J_det = elem_data.at("J_det_vol");
+        const DView2& phi = dg_space->get_volume_basis_values();
+        const DView2& dphi_dx = elem_data.at("dphi_dx_vol");
 
-        int n_quad = weights.size();
+        int n_quad = weights.extent(0);
         int n_basis = dg_space->get_basis()->get_n_basis();
 
         for (int q = 0; q < n_quad; ++q) {
-            Eigen::Vector2d xi_q = dg_space->get_volume_quad()->points.row(q);
-            Eigen::Vector2d x_q = mapping->map_to_physical(vertices, xi_q);
+            Vec2 xi_q = row2(dg_space->get_volume_quad()->points, q);
+            Vec2 x_q = mapping->map_to_physical(vertices, xi_q);
 
             double u_h = 0.0;
-            Eigen::Vector2d grad_u_h = Eigen::Vector2d::Zero();
+            Vec2 grad_u_h{0.0, 0.0};
 
             for (int i = 0; i < n_basis; ++i) {
                 u_h += elem_coeffs[i] * phi(q, i);
-                grad_u_h += elem_coeffs[i] * dphi_dx.row(q * n_basis + i).transpose();
+                grad_u_h += elem_coeffs[i] * row2(dphi_dx, q * n_basis + i);
             }
 
             double u_exact = exact_solution(x_q);
-            Eigen::Vector2d grad_u_exact =
-                exact_gradient ? exact_gradient(x_q) : Eigen::Vector2d::Zero();
+            Vec2 grad_u_exact = exact_gradient ? exact_gradient(x_q) : Vec2{0.0, 0.0};
 
-            double w_q = weights[q] * std::abs(J_det[q]);
+            double w_q = weights[q] * std::abs(J_det(q, 0));
 
             L2_error_sq += w_q * std::pow(u_h - u_exact, 2.0);
             if (exact_gradient) {
-                H1_seminorm_sq += w_q * (grad_u_h - grad_u_exact).squaredNorm();
+                Vec2 diff = grad_u_h - grad_u_exact;
+                H1_seminorm_sq += w_q * dot(diff, diff);
             }
         }
     }

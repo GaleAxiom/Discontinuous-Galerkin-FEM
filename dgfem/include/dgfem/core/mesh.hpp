@@ -5,7 +5,8 @@
 
 #pragma once
 
-#include <Eigen/Dense>
+#include "dgfem/kokkos_math.hpp"
+
 #include <optional>
 
 #include <map>
@@ -28,8 +29,8 @@ class BoundaryConditionEuler;
  */
 class DGMesh {
 public:
-    DGMesh(const Eigen::MatrixXd& vertices, const Eigen::MatrixXi& elements,
-           const Eigen::VectorXi& element_tags, const std::map<std::string, int>& boundary_tags,
+    DGMesh(const DView2& vertices, const IView2& elements, const IView1& element_tags,
+           const std::map<std::string, int>& boundary_tags,
            const std::map<int, std::vector<std::pair<int, int>>>& boundary_edges);
 
     // Delete copy, default move
@@ -51,21 +52,29 @@ public:
     [[nodiscard]] std::vector<std::pair<int, int>> get_element_neighbors(int elem_id) const;
 
     /**
+     * @brief Gather the physical vertex coordinates of one element into a (n_verts x 2) view.
+     */
+    [[nodiscard]] DView2 get_element_vertices(int elem_id) const;
+
+    /**
      * @brief Get element data (computed by DG space)
      */
-    [[nodiscard]] const std::map<std::string, Eigen::MatrixXd>& get_element_data(int elem_id) const;
+    [[nodiscard]] const std::map<std::string, DView2>& get_element_data(int elem_id) const;
 
     /**
      * @brief Get face data for specific element face
      */
-    [[nodiscard]] const std::map<std::string, Eigen::VectorXd>& get_face_data(int elem_id,
-                                                                              int face_id) const;
+    [[nodiscard]] const std::map<std::string, DView2>& get_element_face_data(int elem_id,
+                                                                             int face_id) const;
 
     /**
-     * @brief Get element face data (returns map with MatrixXd for compatibility)
+     * @brief Alias for get_element_face_data(); both map types were unified during the
+     * Eigen->Kokkos migration, so there's no longer a distinction to preserve.
      */
-    [[nodiscard]] const std::map<std::string, Eigen::MatrixXd>&
-    get_element_face_data(int elem_id, int face_id) const;
+    [[nodiscard]] const std::map<std::string, DView2>& get_face_data(int elem_id,
+                                                                     int face_id) const {
+        return get_element_face_data(elem_id, face_id);
+    }
 
     /**
      * @brief Set boundary condition for a boundary tag
@@ -112,9 +121,9 @@ public:
     [[nodiscard]] bool is_boundary_face(int elem_id, int face_id) const noexcept;
 
     // Getters with [[nodiscard]]
-    [[nodiscard]] const Eigen::MatrixXd& get_vertices() const noexcept { return vertices_; }
-    [[nodiscard]] const Eigen::MatrixXi& get_elements() const noexcept { return elements_; }
-    [[nodiscard]] const Eigen::VectorXi& get_element_tags() const noexcept { return element_tags_; }
+    [[nodiscard]] const DView2& get_vertices() const noexcept { return vertices_; }
+    [[nodiscard]] const IView2& get_elements() const noexcept { return elements_; }
+    [[nodiscard]] const IView1& get_element_tags() const noexcept { return element_tags_; }
     [[nodiscard]] const std::map<std::string, int>& get_boundary_tags() const noexcept {
         return boundary_tags_;
     }
@@ -147,8 +156,8 @@ public:
     struct FaceConnectivity {
         int elem_L, elem_R;
         int face_L, face_R;
-        Eigen::VectorXi permutation;
-        Eigen::MatrixXd vertices_L, vertices_R;
+        IView1 permutation;
+        DView2 vertices_L, vertices_R;
         std::shared_ptr<BoundaryConditionEuler> bc_euler;  // For boundary faces
         std::string bc_tag;
         bool is_boundary;
@@ -188,9 +197,9 @@ private:
     identify_boundary_faces(const std::map<int, std::vector<std::pair<int, int>>>& boundary_edges);
 
     // Mesh data
-    Eigen::MatrixXd vertices_;
-    Eigen::MatrixXi elements_;
-    Eigen::VectorXi element_tags_;
+    DView2 vertices_;
+    IView2 elements_;
+    IView1 element_tags_;
     std::map<std::string, int> boundary_tags_;
 
     int n_elements_;
@@ -198,7 +207,7 @@ private:
     int n_faces_per_elem_;
 
     // Connectivity
-    Eigen::MatrixXi face_neighbors_;  ///< (n_elements x n_faces x 2) neighbor info
+    IView2 face_neighbors_;  ///< (n_elements x n_faces x 2) neighbor info
     std::vector<std::pair<int, int>> boundary_faces_;
     std::map<int, std::vector<std::pair<int, int>>>
         node_to_elements_;  ///< node_id -> list of (elem_id, local_node_id)
@@ -212,9 +221,8 @@ private:
     std::shared_ptr<DGSolution> solution_;
 
     // Element and face data computed by DG space
-    std::vector<std::map<std::string, Eigen::MatrixXd>> element_data_;
-    std::vector<std::vector<std::map<std::string, Eigen::VectorXd>>> face_data_;
-    std::vector<std::vector<std::map<std::string, Eigen::MatrixXd>>> face_data_matrix_;
+    std::vector<std::map<std::string, DView2>> element_data_;
+    std::vector<std::vector<std::map<std::string, DView2>>> face_data_;
 
     // Boundary conditions
     std::map<std::string, std::shared_ptr<BoundaryCondition>> boundary_conditions_;

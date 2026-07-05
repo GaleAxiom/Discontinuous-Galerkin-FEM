@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <Eigen/Dense>
+#include "dgfem/kokkos_math.hpp"
 
 #include <functional>
 #include <map>
@@ -48,10 +48,9 @@ public:
      * @param source_func Optional source function (for elliptic problems)
      * @param bc_func Optional boundary condition function (for time-dependent problems)
      */
-    virtual void
-    assemble(DGAssembler& assembler,
-             std::function<double(const Eigen::Vector2d&)> source_func = nullptr,
-             std::function<double(const Eigen::Vector2d&)> bc_func = nullptr) const = 0;
+    virtual void assemble(DGAssembler& assembler,
+                          std::function<double(const Vec2&)> source_func = nullptr,
+                          std::function<double(const Vec2&)> bc_func = nullptr) const = 0;
 };
 
 /**
@@ -65,45 +64,43 @@ public:
     /**
      * @brief Assemble time-independent system
      */
-    void assemble(DGAssembler& assembler,
-                  std::function<double(const Eigen::Vector2d&)> source_func = nullptr,
-                  std::function<double(const Eigen::Vector2d&)> bc_func = nullptr) const override;
+    void assemble(DGAssembler& assembler, std::function<double(const Vec2&)> source_func = nullptr,
+                  std::function<double(const Vec2&)> bc_func = nullptr) const override;
 
     /**
      * @brief Volume integral contribution - must be implemented by derived classes
      */
-    [[nodiscard]] virtual Eigen::MatrixXd
-    compute_volume_integral(const std::map<std::string, Eigen::MatrixXd>& elem_data,
+    [[nodiscard]] virtual DView2
+    compute_volume_integral(const std::map<std::string, DView2>& elem_data,
                             std::shared_ptr<DGSpace> dg_space) const = 0;
 
     /**
      * @brief Interior face integral contribution - must be implemented by derived classes
      */
-    [[nodiscard]] virtual std::tuple<Eigen::MatrixXd, Eigen::MatrixXd, Eigen::MatrixXd,
-                                     Eigen::MatrixXd>
-    compute_interior_face_integral(
-        int elem_L, int face_L, int elem_R, int face_R, std::shared_ptr<DGMesh> mesh,
-        const Eigen::VectorXi& permutation = Eigen::VectorXi()) const = 0;
+    [[nodiscard]] virtual std::tuple<DView2, DView2, DView2, DView2>
+    compute_interior_face_integral(int elem_L, int face_L, int elem_R, int face_R,
+                                   std::shared_ptr<DGMesh> mesh,
+                                   const IView1& permutation = IView1()) const = 0;
 
     /**
      * @brief Boundary face integral contribution - must be implemented by derived classes
      */
-    [[nodiscard]] virtual Eigen::MatrixXd
+    [[nodiscard]] virtual DView2
     compute_boundary_face_integral(int elem_id, int face_id, std::shared_ptr<DGMesh> mesh,
                                    std::shared_ptr<BoundaryCondition> bc) const = 0;
 
     /**
      * @brief Boundary RHS contribution - must be implemented by derived classes
      */
-    [[nodiscard]] virtual Eigen::VectorXd
+    [[nodiscard]] virtual DView1
     compute_boundary_rhs_integral(int elem_id, int face_id, std::shared_ptr<DGMesh> mesh,
                                   std::shared_ptr<BoundaryCondition> bc) const = 0;
 
     /**
      * @brief Source integral contribution - common implementation
      */
-    [[nodiscard]] virtual Eigen::VectorXd
-    compute_source_integral(int elem_id, std::function<double(const Eigen::Vector2d&)> source_func,
+    [[nodiscard]] virtual DView1
+    compute_source_integral(int elem_id, std::function<double(const Vec2&)> source_func,
                             std::shared_ptr<DGMesh> mesh) const;
 };
 
@@ -117,40 +114,37 @@ public:
     /**
      * @brief Assemble time-dependent spatial operator
      */
-    void assemble(DGAssembler& assembler,
-                  std::function<double(const Eigen::Vector2d&)> source_func = nullptr,
-                  std::function<double(const Eigen::Vector2d&)> bc_func = nullptr) const override;
+    void assemble(DGAssembler& assembler, std::function<double(const Vec2&)> source_func = nullptr,
+                  std::function<double(const Vec2&)> bc_func = nullptr) const override;
 
     /**
      * @brief Common mass matrix integral for all time-dependent problems
      */
-    [[nodiscard]] Eigen::MatrixXd
-    compute_mass_integral(const std::map<std::string, Eigen::MatrixXd>& elem_data,
-                          std::shared_ptr<DGSpace> dg_space) const;
+    [[nodiscard]] DView2 compute_mass_integral(const std::map<std::string, DView2>& elem_data,
+                                               std::shared_ptr<DGSpace> dg_space) const;
 
     /**
      * @brief Volume (stiffness) integral contribution - must be implemented by derived classes
      */
-    [[nodiscard]] virtual Eigen::MatrixXd
-    compute_volume_integral(const std::map<std::string, Eigen::MatrixXd>& elem_data,
+    [[nodiscard]] virtual DView2
+    compute_volume_integral(const std::map<std::string, DView2>& elem_data,
                             std::shared_ptr<DGSpace> dg_space) const = 0;
 
     /**
      * @brief Interior face integral contribution - must be implemented by derived classes
      */
-    [[nodiscard]] virtual std::tuple<Eigen::MatrixXd, Eigen::MatrixXd, Eigen::MatrixXd,
-                                     Eigen::MatrixXd>
-    compute_interior_face_integral(
-        int elem_L, int face_L, int elem_R, int face_R, std::shared_ptr<DGMesh> mesh,
-        const Eigen::VectorXi& permutation = Eigen::VectorXi()) const = 0;
+    [[nodiscard]] virtual std::tuple<DView2, DView2, DView2, DView2>
+    compute_interior_face_integral(int elem_L, int face_L, int elem_R, int face_R,
+                                   std::shared_ptr<DGMesh> mesh,
+                                   const IView1& permutation = IView1()) const = 0;
 
     /**
      * @brief Boundary face integral contribution - must be implemented by derived classes
      * Returns (L_bc, F_bc) - matrix and RHS contributions
      */
-    [[nodiscard]] virtual std::tuple<Eigen::MatrixXd, Eigen::VectorXd>
+    [[nodiscard]] virtual std::tuple<DView2, DView1>
     compute_boundary_face_integral(int elem_id, int face_id, std::shared_ptr<DGMesh> mesh,
-                                   std::function<double(const Eigen::Vector2d&)> bc_func) const = 0;
+                                   std::function<double(const Vec2&)> bc_func) const = 0;
 };
 
 }  // namespace dgfem

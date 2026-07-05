@@ -8,7 +8,8 @@
 
 #pragma once
 
-#include <Eigen/Dense>
+#include "dgfem/kokkos_math.hpp"
+#include "dgfem/solver/trilinos_types.hpp"
 
 #include <functional>
 #include <vector>
@@ -55,78 +56,51 @@ public:
     }
 
 private:
-    // Helper for scalar vectors: result = a + alpha*b
-    static Eigen::VectorXd add_scaled(const Eigen::VectorXd& a, double alpha,
-                                      const Eigen::VectorXd& b) {
-        return a + alpha * b;
+    // Helper for a global Tpetra vector: result = a + alpha*b
+    static Teuchos::RCP<TpetraMultiVector> add_scaled(const Teuchos::RCP<TpetraMultiVector>& a,
+                                                      double alpha,
+                                                      const Teuchos::RCP<TpetraMultiVector>& b) {
+        auto result = Teuchos::rcp(new TpetraMultiVector(*a, Teuchos::Copy));
+        result->update(alpha, *b, 1.0);
+        return result;
     }
 
-    // Helper for scalar vectors: result = alpha*a
-    static Eigen::VectorXd scale(double alpha, const Eigen::VectorXd& a) { return alpha * a; }
+    // Helper for a global Tpetra vector: result = alpha*a
+    static Teuchos::RCP<TpetraMultiVector> scale(double alpha,
+                                                 const Teuchos::RCP<TpetraMultiVector>& a) {
+        auto result = Teuchos::rcp(new TpetraMultiVector(*a, Teuchos::Copy));
+        result->scale(alpha);
+        return result;
+    }
 
-    // Helper for vector of matrices: result = a + alpha*b
-    static std::vector<Eigen::MatrixXd> add_scaled(const std::vector<Eigen::MatrixXd>& a,
-                                                   double alpha,
-                                                   const std::vector<Eigen::MatrixXd>& b) {
-        std::vector<Eigen::MatrixXd> result(a.size());
-        for (size_t i = 0; i < a.size(); ++i) {
-            result[i] = a[i] + alpha * b[i];
+    // Helper for per-element local blocks (compressible StateVector): result = a + alpha*b
+    static std::vector<DView2> add_scaled(const std::vector<DView2>& a, double alpha,
+                                          const std::vector<DView2>& b) {
+        std::vector<DView2> result(a.size());
+        for (size_t e = 0; e < a.size(); ++e) {
+            result[e] = DView2("rk_tmp", a[e].extent(0), a[e].extent(1));
+            for (int i = 0; i < static_cast<int>(a[e].extent(0)); ++i) {
+                for (int j = 0; j < static_cast<int>(a[e].extent(1)); ++j) {
+                    result[e](i, j) = a[e](i, j) + alpha * b[e](i, j);
+                }
+            }
         }
         return result;
     }
 
-    // Helper for vector of matrices: result = alpha*a
-    static std::vector<Eigen::MatrixXd> scale(double alpha, const std::vector<Eigen::MatrixXd>& a) {
-        std::vector<Eigen::MatrixXd> result(a.size());
-        for (size_t i = 0; i < a.size(); ++i) {
-            result[i] = alpha * a[i];
+    // Helper for per-element local blocks: result = alpha*a
+    static std::vector<DView2> scale(double alpha, const std::vector<DView2>& a) {
+        std::vector<DView2> result(a.size());
+        for (size_t e = 0; e < a.size(); ++e) {
+            result[e] = DView2("rk_tmp", a[e].extent(0), a[e].extent(1));
+            for (int i = 0; i < static_cast<int>(a[e].extent(0)); ++i) {
+                for (int j = 0; j < static_cast<int>(a[e].extent(1)); ++j) {
+                    result[e](i, j) = alpha * a[e](i, j);
+                }
+            }
         }
         return result;
     }
-};
-
-/**
- * @brief Block-diagonal mass matrix operations
- *
- * DG discretizations have block-diagonal mass matrices (one block per element).
- * This class precomputes and applies the inverse efficiently.
- */
-class BlockMassMatrix {
-public:
-    /**
-     * @brief Compute and store inverse of mass matrix blocks
-     * @param mass_blocks Mass matrix for each element
-     */
-    explicit BlockMassMatrix(const std::vector<Eigen::MatrixXd>& mass_blocks);
-
-    /**
-     * @brief Apply M^{-1} to a vector (scalar variable)
-     * @param vec Input vector of size (n_elem * n_basis)
-     * @return Result of M^{-1} * vec
-     */
-    Eigen::VectorXd apply_inverse(const Eigen::VectorXd& vec) const;
-
-    /**
-     * @brief Apply M^{-1} to element-wise matrices (system of variables)
-     * @param vec Input (n_elem matrices of size n_basis x n_vars)
-     * @return Result of M^{-1} applied to each element
-     */
-    std::vector<Eigen::MatrixXd> apply_inverse(const std::vector<Eigen::MatrixXd>& vec) const;
-
-    /**
-     * @brief Get number of elements
-     */
-    [[nodiscard]] int get_n_elements() const noexcept { return n_elem_; }
-
-    /**
-     * @brief Get number of basis functions per element
-     */
-    [[nodiscard]] int get_n_basis() const noexcept { return n_basis_; }
-
-private:
-    int n_elem_;
-    int n_basis_;
-    std::vector<Eigen::MatrixXd> M_inv_blocks_;
 };
 
 }  // namespace dgfem

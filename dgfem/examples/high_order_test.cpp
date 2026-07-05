@@ -3,20 +3,21 @@
  * @brief Test high-order elements (order 1-7) with Laplace solver
  */
 
-#include "dgfem/boundary/conditions.hpp"
 #include "dgfem/config/config.hpp"
 #include "dgfem/core/mesh.hpp"
 #include "dgfem/core/space.hpp"
 #include "dgfem/solver/dg_solver.hpp"
-#include "dgfem/utils/mesh_creation.hpp"
+#include "dgfem/utils/example_helpers.hpp"
 
+#include <Kokkos_Core.hpp>
 #include <cmath>
 
 #include <iomanip>
 #include <iostream>
 #include <memory>
 
-int main() {
+int main(int argc, char** argv) {
+    Kokkos::ScopeGuard kokkos_guard(argc, argv);
     try {
         std::cout << "=== High-Order DG Elements Test ===" << std::endl;
         std::cout << "Testing polynomial orders 1-7 with Laplace equation" << std::endl;
@@ -35,26 +36,13 @@ int main() {
             std::cout << "--- Testing Polynomial Order " << order << " ---" << std::endl;
 
             auto& config = dgfem::Config::instance();
-            config.use_triangles = true;
-            config.order = order;
-            config.dx = 0.1;  // Fixed mesh size for comparison
-            config.xmin = 0.0;
-            config.xmax = 1.0;
-            config.ymin = 0.0;
-            config.ymax = 1.0;
-            config.sigma = 10.0;  // Penalty parameter
+            config.sigma = 10.0;        // Penalty parameter
+            constexpr double dx = 0.1;  // Fixed mesh size for comparison
 
-            // Create mesh
-            auto mesh = dgfem::MeshCreator::create_rectangular_mesh(config.dx, config.use_triangles,
-                                                                    config.xmin, config.xmax,
-                                                                    config.ymin, config.ymax);
-
-            // Create DG space
-            auto dg_space =
-                std::make_shared<dgfem::DGSpace>(mesh->get_element_type(), config.order);
-
-            // Initialize mesh with DG space
-            mesh->initialize_dg_space(dg_space, 1);
+            // Create mesh + DG space (1 variable for scalar Laplace)
+            auto mesh = dgfem::MeshSetup::create_standard_mesh(/*use_triangles=*/true, order, dx,
+                                                               /*n_vars=*/1, 0.0, 1.0, 0.0, 1.0);
+            auto dg_space = mesh->get_dg_space();
 
             std::cout << "  Mesh: " << mesh->get_n_elements() << " elements" << std::endl;
             std::cout << "  Basis functions per element: " << dg_space->get_basis()->get_n_basis()
@@ -67,26 +55,22 @@ int main() {
             std::cout << "  Total DOFs: " << total_dofs << std::endl;
 
             // Set up boundary conditions (homogeneous Dirichlet)
-            auto bc_zero = dgfem::make_dirichlet_bc(0.0);
-            mesh->set_boundary_condition("Bottom", bc_zero);
-            mesh->set_boundary_condition("Top", bc_zero);
-            mesh->set_boundary_condition("Left", bc_zero);
-            mesh->set_boundary_condition("Right", bc_zero);
+            dgfem::set_rectangle_dirichlet_bc(mesh, 0.0);
 
             // Manufactured solution: u(x,y) = sin(pi*x) * sin(pi*y)
             // This satisfies homogeneous Dirichlet BCs on [0,1]^2
-            auto exact_solution = [](const Eigen::Vector2d& x) -> double {
+            auto exact_solution = [](const dgfem::Vec2& x) -> double {
                 return std::sin(M_PI * x[0]) * std::sin(M_PI * x[1]);
             };
 
             // Source function: f = -Laplacian(u) = 2*pi^2 * sin(pi*x) * sin(pi*y)
-            auto source_function = [](const Eigen::Vector2d& x) -> double {
+            auto source_function = [](const dgfem::Vec2& x) -> double {
                 return 2.0 * M_PI * M_PI * std::sin(M_PI * x[0]) * std::sin(M_PI * x[1]);
             };
 
             // Exact gradient for H1 error computation
-            auto exact_gradient = [](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-                Eigen::Vector2d grad;
+            auto exact_gradient = [](const dgfem::Vec2& x) -> dgfem::Vec2 {
+                dgfem::Vec2 grad;
                 grad[0] = M_PI * std::cos(M_PI * x[0]) * std::sin(M_PI * x[1]);
                 grad[1] = M_PI * std::sin(M_PI * x[0]) * std::cos(M_PI * x[1]);
                 return grad;
@@ -97,7 +81,7 @@ int main() {
 
             try {
                 // Solve
-                Eigen::VectorXd solution = solver.solve(source_function);
+                dgfem::DView1 solution = solver.solve(source_function);
 
                 // Compute errors using built-in method
                 auto errors = solver.compute_error(exact_solution, exact_gradient);

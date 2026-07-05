@@ -15,16 +15,19 @@ namespace dgfem {
  * Implements the Dubiner basis which provides orthogonal polynomials
  * on the reference triangle using Jacobi polynomials.
  */
-class DubinerBasis : public OrthogonalBasis {
+class DubinerBasis : public OrthogonalBasisCRTP<DubinerBasis> {
 public:
     explicit DubinerBasis(int order);
 
-    Eigen::VectorXd evaluate(const Eigen::Vector2d& xi) const override;
-    Eigen::MatrixXd evaluate_gradient(const Eigen::Vector2d& xi) const override;
+    DView1 evaluate_impl(const Vec2& xi) const;
+    DView2 evaluate_gradient_impl(const Vec2& xi) const;
+
+    // Public (unlike the rest of this class's helpers below) since the CRTP base in
+    // orthogonal.hpp dispatches to it via static_cast on a Derived*, which requires
+    // public access -- matches LegendreBasis's already-public compute_n_basis.
+    int compute_n_basis_impl() const;
 
 protected:
-    int compute_n_basis() const override;
-
     /**
      * @brief Evaluate Jacobi polynomial P_n^(alpha,beta)(x)
      */
@@ -38,7 +41,7 @@ protected:
     /**
      * @brief Transform from reference triangle to Dubiner coordinates
      */
-    std::pair<double, double> transform_coordinates(const Eigen::Vector2d& xi) const;
+    std::pair<double, double> transform_coordinates(const Vec2& xi) const;
 
     /**
      * @brief Compute the Dubiner basis function indices for given total degree

@@ -22,13 +22,16 @@
  * where ω = k·c and c = √(γp₀/ρ₀) is the speed of sound.
  */
 
+#include <Kokkos_Core.hpp>
 #include <cmath>
 
+#include <algorithm>
 #include <chrono>
 #include <complex>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -68,7 +71,7 @@ struct AcousticWave {
     }
 
     // Get primitive variables at time t
-    Eigen::Vector4d primitive_variables(double x, double y, double t) const {
+    dgfem::Vec4 primitive_variables(double x, double y, double t) const {
         // 1D plane wave in x-direction
         double phase = k * x - omega * t;
 
@@ -77,14 +80,12 @@ struct AcousticWave {
         double v = 0.0;  // No y-component for x-directed wave
         double p = p0 + amplitude * c * c * std::sin(phase);
 
-        Eigen::Vector4d W;
-        W << rho, u, v, p;
-        return W;
+        return dgfem::Vec4{rho, u, v, p};
     }
 
     // Get conserved variables at time t
-    Eigen::Vector4d conserved_variables(double x, double y, double t) const {
-        Eigen::Vector4d W = primitive_variables(x, y, t);
+    dgfem::Vec4 conserved_variables(double x, double y, double t) const {
+        dgfem::Vec4 W = primitive_variables(x, y, t);
         return dgfem::primitive_to_conserved(W, gamma);
     }
 
@@ -97,9 +98,20 @@ struct AcousticWave {
     double exact_phase(double x, double t) const { return k * x - omega * t; }
 };
 
+// Min/max of column `col` of an (n, m) view.
+static std::pair<double, double> col_min_max(const dgfem::DView2& m, int col) {
+    double lo = std::numeric_limits<double>::infinity();
+    double hi = -std::numeric_limits<double>::infinity();
+    for (int i = 0; i < static_cast<int>(m.extent(0)); ++i) {
+        lo = std::min(lo, m(i, col));
+        hi = std::max(hi, m(i, col));
+    }
+    return {lo, hi};
+}
+
 // Measure wave amplitude using Fourier analysis (perturbation only)
-double measure_amplitude(const std::shared_ptr<dgfem::DGMesh>& mesh,
-                         const Eigen::MatrixXd& solution, double k, double gamma,
+double measure_amplitude(const std::shared_ptr<dgfem::DGMesh>& mesh, const dgfem::DView2& solution,
+                         double k, double gamma,
                          double rho0) {  // Add background density parameter
     auto dg_space = mesh->get_dg_space();
     auto mapping = dg_space->get_mapping();
@@ -113,39 +125,33 @@ double measure_amplitude(const std::shared_ptr<dgfem::DGMesh>& mesh,
     std::vector<double> x_samples(n_samples);
     std::vector<double> rho_samples(n_samples);
 
-    double xmin = mesh->get_vertices().col(0).minCoeff();
-    double xmax = mesh->get_vertices().col(0).maxCoeff();
+    auto [xmin, xmax] = col_min_max(mesh->get_vertices(), 0);
 
     const auto& quad_points = dg_space->get_volume_quad()->points;
-    const Eigen::MatrixXd& phi = dg_space->get_volume_basis_values();
+    const dgfem::DView2& phi = dg_space->get_volume_basis_values();
 
     for (int i = 0; i < n_samples; ++i) {
         x_samples[i] = xmin + (xmax - xmin) * i / (n_samples - 1);
 
         // Find element containing this point and evaluate solution
         for (int e = 0; e < n_elem; ++e) {
-            Eigen::MatrixXd vertices(mesh->get_elements().cols(), 2);
-            for (int v = 0; v < mesh->get_elements().cols(); ++v) {
-                vertices.row(v) = mesh->get_vertices().row(mesh->get_elements()(e, v));
-            }
+            dgfem::DView2 vertices = mesh->get_element_vertices(e);
 
             // Check if point is in this element (simple box test)
-            double x_min = vertices.col(0).minCoeff();
-            double x_max = vertices.col(0).maxCoeff();
-            double y_min = vertices.col(1).minCoeff();
-            double y_max = vertices.col(1).maxCoeff();
+            auto [x_min, x_max] = col_min_max(vertices, 0);
+            auto [y_min, y_max] = col_min_max(vertices, 1);
 
             if (x_samples[i] >= x_min && x_samples[i] <= x_max && y_sample >= y_min &&
                 y_sample <= y_max) {
                 // Use first quadrature point approximation for simplicity
-                Eigen::Vector4d U = Eigen::Vector4d::Zero();
+                dgfem::Vec4 U{0.0, 0.0, 0.0, 0.0};
                 for (int j = 0; j < n_basis; ++j) {
                     for (int var = 0; var < 4; ++var) {
                         U[var] += solution(e, j * 4 + var) * phi(0, j);
                     }
                 }
 
-                Eigen::Vector4d W = dgfem::conserved_to_primitive(U, gamma);
+                dgfem::Vec4 W = dgfem::conserved_to_primitive(U, gamma);
                 rho_samples[i] = W[0] - rho0;  // Store PERTURBATION only
                 break;
             }
@@ -171,7 +177,7 @@ double measure_amplitude(const std::shared_ptr<dgfem::DGMesh>& mesh,
 
 // Measure phase shift by comparing numerical to exact solution
 double measure_phase_shift(const std::shared_ptr<dgfem::DGMesh>& mesh,
-                           const Eigen::MatrixXd& solution, const AcousticWave& exact, double t,
+                           const dgfem::DView2& solution, const AcousticWave& exact, double t,
                            double gamma) {
     auto dg_space = mesh->get_dg_space();
     int n_elem = mesh->get_n_elements();
@@ -181,11 +187,10 @@ double measure_phase_shift(const std::shared_ptr<dgfem::DGMesh>& mesh,
     const int n_samples = 200;
     double y_sample = M_PI;
 
-    double xmin = mesh->get_vertices().col(0).minCoeff();
-    double xmax = mesh->get_vertices().col(0).maxCoeff();
+    auto [xmin, xmax] = col_min_max(mesh->get_vertices(), 0);
 
     const auto& quad_points = dg_space->get_volume_quad()->points;
-    const Eigen::MatrixXd& phi = dg_space->get_volume_basis_values();
+    const dgfem::DView2& phi = dg_space->get_volume_basis_values();
 
     // Compute cross-correlation to find phase shift
     std::vector<double> rho_num_samples(n_samples);
@@ -196,27 +201,22 @@ double measure_phase_shift(const std::shared_ptr<dgfem::DGMesh>& mesh,
 
         // Find element containing this point
         for (int e = 0; e < n_elem; ++e) {
-            Eigen::MatrixXd vertices(mesh->get_elements().cols(), 2);
-            for (int v = 0; v < mesh->get_elements().cols(); ++v) {
-                vertices.row(v) = mesh->get_vertices().row(mesh->get_elements()(e, v));
-            }
+            dgfem::DView2 vertices = mesh->get_element_vertices(e);
 
-            double x_min = vertices.col(0).minCoeff();
-            double x_max = vertices.col(0).maxCoeff();
-            double y_min = vertices.col(1).minCoeff();
-            double y_max = vertices.col(1).maxCoeff();
+            auto [x_min, x_max] = col_min_max(vertices, 0);
+            auto [y_min, y_max] = col_min_max(vertices, 1);
 
             if (x >= x_min && x <= x_max && y_sample >= y_min && y_sample <= y_max) {
                 // Evaluate numerical solution
-                Eigen::Vector4d U = Eigen::Vector4d::Zero();
+                dgfem::Vec4 U{0.0, 0.0, 0.0, 0.0};
                 for (int j = 0; j < n_basis; ++j) {
                     for (int var = 0; var < 4; ++var) {
                         U[var] += solution(e, j * 4 + var) * phi(0, j);
                     }
                 }
 
-                Eigen::Vector4d W_num = dgfem::conserved_to_primitive(U, gamma);
-                Eigen::Vector4d W_exact = exact.primitive_variables(x, y_sample, t);
+                dgfem::Vec4 W_num = dgfem::conserved_to_primitive(U, gamma);
+                dgfem::Vec4 W_exact = exact.primitive_variables(x, y_sample, t);
 
                 // Store density perturbations
                 rho_num_samples[i] = W_num[0] - exact.rho0;
@@ -259,7 +259,7 @@ double measure_phase_shift(const std::shared_ptr<dgfem::DGMesh>& mesh,
 
 // Compute L2 errors
 std::map<std::string, double> compute_errors(const std::shared_ptr<dgfem::DGMesh>& mesh,
-                                             const Eigen::MatrixXd& numerical_solution,
+                                             const dgfem::DView2& numerical_solution,
                                              const AcousticWave& exact, double time, double gamma) {
     auto dg_space = mesh->get_dg_space();
     auto mapping = dg_space->get_mapping();
@@ -272,35 +272,32 @@ std::map<std::string, double> compute_errors(const std::shared_ptr<dgfem::DGMesh
 
     const auto& quad_points = dg_space->get_volume_quad()->points;
     const auto& quad_weights = dg_space->get_volume_quad()->weights;
-    int n_quad = quad_weights.size();
+    int n_quad = static_cast<int>(quad_weights.size());
 
     for (int e = 0; e < n_elem; ++e) {
         const auto& elem_data = mesh->get_element_data(e);
-        const Eigen::VectorXd& J_det = elem_data.at("J_det_vol");
+        const dgfem::DView2& J_det = elem_data.at("J_det_vol");
 
-        Eigen::MatrixXd vertices(mesh->get_elements().cols(), 2);
-        for (int i = 0; i < mesh->get_elements().cols(); ++i) {
-            vertices.row(i) = mesh->get_vertices().row(mesh->get_elements()(e, i));
-        }
+        dgfem::DView2 vertices = mesh->get_element_vertices(e);
 
-        const Eigen::MatrixXd& phi = dg_space->get_volume_basis_values();
+        const dgfem::DView2& phi = dg_space->get_volume_basis_values();
 
         for (int q = 0; q < n_quad; ++q) {
             double w_q = quad_weights[q];
-            double det_J = J_det[q];
+            double det_J = J_det(q, 0);
 
-            Eigen::Vector2d xi_q = quad_points.row(q);
-            Eigen::Vector2d x_phys = mapping->map_to_physical(vertices, xi_q);
+            dgfem::Vec2 xi_q = dgfem::row2(quad_points, q);
+            dgfem::Vec2 x_phys = mapping->map_to_physical(vertices, xi_q);
 
-            Eigen::Vector4d U_num = Eigen::Vector4d::Zero();
+            dgfem::Vec4 U_num{0.0, 0.0, 0.0, 0.0};
             for (int i = 0; i < n_basis; ++i) {
                 for (int var = 0; var < 4; ++var) {
                     U_num[var] += numerical_solution(e, i * 4 + var) * phi(q, i);
                 }
             }
 
-            Eigen::Vector4d W_num = dgfem::conserved_to_primitive(U_num, gamma);
-            Eigen::Vector4d W_exact = exact.primitive_variables(x_phys[0], x_phys[1], time);
+            dgfem::Vec4 W_num = dgfem::conserved_to_primitive(U_num, gamma);
+            dgfem::Vec4 W_exact = exact.primitive_variables(x_phys[0], x_phys[1], time);
 
             double dw = w_q * det_J;
 
@@ -323,7 +320,8 @@ std::map<std::string, double> compute_errors(const std::shared_ptr<dgfem::DGMesh
     return errors;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    Kokkos::ScopeGuard kokkos_guard(argc, argv);
     try {
         std::cout << "=== DGFEM Acoustic Wave Propagation Test ===" << std::endl;
         std::cout << "============================================" << std::endl;
@@ -440,7 +438,7 @@ int main() {
                       << std::endl;
 
             // Initial condition
-            auto initial_condition = [&exact_wave](const Eigen::Vector2d& x) -> Eigen::Vector4d {
+            auto initial_condition = [&exact_wave](const dgfem::Vec2& x) -> dgfem::Vec4 {
                 return exact_wave.conserved_variables(x[0], x[1], 0.0);
             };
 
@@ -454,7 +452,7 @@ int main() {
             std::cout << "\n--- Solving ---" << std::endl;
             auto start = std::chrono::high_resolution_clock::now();
 
-            std::vector<Eigen::MatrixXd> solutions =
+            std::vector<dgfem::DView2> solutions =
                 solver.solve(initial_condition, T_final, dt, save_every);
 
             auto end = std::chrono::high_resolution_clock::now();

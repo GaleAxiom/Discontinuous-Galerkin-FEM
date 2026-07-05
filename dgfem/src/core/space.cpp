@@ -17,6 +17,16 @@
 
 namespace dgfem {
 
+namespace {
+// Wrap a single scalar as a (1,1) DView2, matching how Eigen::VectorXd::Constant(1, v)
+// used to represent a single-value "vector" entry in a map<string, MatrixXd>.
+DView2 scalar_view(const char* label, double value) {
+    DView2 v(label, 1, 1);
+    v(0, 0) = value;
+    return v;
+}
+}  // namespace
+
 DGSpace::DGSpace(std::string_view element_type, int order)
     : order_(order), element_type_(element_type) {
     if (order < 1 || order > 10) {
@@ -66,33 +76,34 @@ DGSpace::DGSpace(std::string_view element_type, int order)
     precompute_basis_values();
 }
 
-std::map<std::string, Eigen::MatrixXd>
-DGSpace::compute_element_data(const Eigen::MatrixXd& vertices,
+std::map<std::string, DView2>
+DGSpace::compute_element_data(const DView2& vertices,
                               const std::vector<std::pair<int, int>>& face_neighbors) const {
-    std::map<std::string, Eigen::MatrixXd> data;
+    std::map<std::string, DView2> data;
 
     int n_vol_quad = volume_quad_->size();
     int n_basis = basis_->get_n_basis();
 
     // Storage for Jacobian determinants and transformed gradients
-    Eigen::VectorXd J_det_vol(n_vol_quad);
-    Eigen::MatrixXd dphi_dx_vol(n_vol_quad * n_basis, 2);
+    DView2 J_det_vol("J_det_vol", n_vol_quad, 1);
+    DView2 dphi_dx_vol("dphi_dx_vol", n_vol_quad * n_basis, 2);
 
-    // Compute at each volume quadrature point
-    for (int q = 0; q < n_vol_quad; ++q) {
-        Eigen::Vector2d xi = volume_quad_->points.row(q);
+    // Compute at each volume quadrature point (independent across q, writes disjoint
+    // rows of J_det_vol/dphi_dx_vol).
+    Kokkos::parallel_for("compute_element_data", n_vol_quad, [&](const int q) {
+        Vec2 xi = row2(volume_quad_->points, q);
 
         // Compute mapping
         MappingData mapping_data = mapping_->compute_mapping(vertices, xi);
-        J_det_vol[q] = mapping_data.J_T_det;
+        J_det_vol(q, 0) = mapping_data.J_T_det;
 
         // Transform basis gradients
         for (int i = 0; i < n_basis; ++i) {
-            Eigen::Vector2d grad_ref = dphi_vol_[q].row(i);
-            Eigen::Vector2d grad_phys = mapping_data.dxi_dx * grad_ref;
-            dphi_dx_vol.row(q * n_basis + i) = grad_phys;
+            Vec2 grad_ref = row2(dphi_vol_[q], i);
+            Vec2 grad_phys = mapping_data.dxi_dx.apply(grad_ref);
+            set_row2(dphi_dx_vol, q * n_basis + i, grad_phys);
         }
-    }
+    });
 
     data["vertices"] = vertices;
     data["J_det_vol"] = J_det_vol;
@@ -101,20 +112,20 @@ DGSpace::compute_element_data(const Eigen::MatrixXd& vertices,
     return data;
 }
 
-std::map<std::string, Eigen::VectorXd>
-DGSpace::compute_face_data(const Eigen::MatrixXd& vertices, int face_id,
+std::map<std::string, DView2>
+DGSpace::compute_face_data(const DView2& vertices, int face_id,
                            const std::pair<int, int>& neighbor_info) const {
-    std::map<std::string, Eigen::VectorXd> data;
+    std::map<std::string, DView2> data;
 
     // Get face vertex indices
     auto [v1_idx, v2_idx] = ref_element_->edge_vertices(face_id);
 
-    Eigen::Vector2d v1 = vertices.row(v1_idx);
-    Eigen::Vector2d v2 = vertices.row(v2_idx);
+    Vec2 v1 = row2(vertices, v1_idx);
+    Vec2 v2 = row2(vertices, v2_idx);
 
     // Compute face properties
-    Eigen::Vector2d tangent = v2 - v1;
-    double edge_length = tangent.norm();
+    Vec2 tangent = v2 - v1;
+    double edge_length = norm(tangent);
 
     if (edge_length < 1e-14) {
         throw std::runtime_error("Degenerate edge detected");
@@ -122,80 +133,83 @@ DGSpace::compute_face_data(const Eigen::MatrixXd& vertices, int face_id,
 
     // Compute normal: rotate tangent 90 degrees clockwise (right-hand rule for outward normal)
     // normal = (tangent_y, -tangent_x)
-    Eigen::Vector2d normal(tangent[1], -tangent[0]);
+    Vec2 normal{tangent[1], -tangent[0]};
     normal /= edge_length;
 
     // Ensure outward normal by checking against centroid
-    Eigen::Vector2d centroid = vertices.colwise().mean();
-    Eigen::Vector2d edge_midpoint = 0.5 * (v1 + v2);
-    Eigen::Vector2d from_centroid_to_edge = edge_midpoint - centroid;
+    Vec2 centroid{0.0, 0.0};
+    for (int i = 0; i < static_cast<int>(vertices.extent(0)); ++i) {
+        centroid += row2(vertices, i);
+    }
+    centroid /= static_cast<double>(vertices.extent(0));
+    Vec2 edge_midpoint = 0.5 * (v1 + v2);
+    Vec2 from_centroid_to_edge = edge_midpoint - centroid;
 
     // The outward normal should point AWAY from the centroid
     // If dot product is negative, the normal points inward, so flip it
-    if (normal.dot(from_centroid_to_edge) < 0) {
+    if (dot(normal, from_centroid_to_edge) < 0) {
         normal = -normal;
     }
 
     // Compute quadrature points on face
     int n_face_quad = face_quad_->size();
-    Eigen::MatrixXd quad_points(n_face_quad, 2);
+    DView2 quad_points("quad_points", n_face_quad, 2);
     int n_basis = basis_->get_n_basis();
-    Eigen::VectorXd dphi_dx_face(n_face_quad * n_basis * 2);
+    DView2 dphi_dx_face("dphi_dx_face", n_face_quad * n_basis, 2);
 
     for (int q = 0; q < n_face_quad; ++q) {
         double s = face_quad_->points(q, 0);  // 1D quadrature point in [-1, 1]
         double t = 0.5 * (s + 1.0);           // Map to [0, 1]
-        quad_points.row(q) = (1.0 - t) * v1 + t * v2;
+        set_row2(quad_points, q, (1.0 - t) * v1 + t * v2);
 
-        Eigen::Vector2d xi_face = map_face_quad_point(face_id, s);
+        Vec2 xi_face = map_face_quad_point(face_id, s);
         auto mapping_data = mapping_->compute_mapping(vertices, xi_face);
-        Eigen::MatrixXd dphi_dxi = basis_->evaluate_gradient(xi_face);
+        DView2 dphi_dxi = basis_->evaluate_gradient(xi_face);
         for (int i = 0; i < n_basis; ++i) {
-            Eigen::Vector2d grad_phys = mapping_data.dxi_dx * dphi_dxi.row(i).transpose();
-            int row_offset = q * n_basis + i;
-            dphi_dx_face[row_offset * 2] = grad_phys[0];
-            dphi_dx_face[row_offset * 2 + 1] = grad_phys[1];
+            Vec2 grad_ref_i = row2(dphi_dxi, i);
+            Vec2 grad_phys = mapping_data.dxi_dx.apply(grad_ref_i);
+            set_row2(dphi_dx_face, q * n_basis + i, grad_phys);
         }
     }
 
     // Store face data
-    data["normal"] = normal;
-    data["length"] = Eigen::VectorXd::Constant(1, edge_length);
-    data["quad_points"] = Eigen::Map<Eigen::VectorXd>(quad_points.data(), quad_points.size());
-    data["neighbor_elem"] = Eigen::VectorXd::Constant(1, neighbor_info.first);
-    data["neighbor_face"] = Eigen::VectorXd::Constant(1, neighbor_info.second);
-    data["is_boundary"] = Eigen::VectorXd::Constant(1, (neighbor_info.first < 0) ? 1.0 : 0.0);
+    DView2 normal_view("normal", 2, 1);
+    normal_view(0, 0) = normal[0];
+    normal_view(1, 0) = normal[1];
+    data["normal"] = normal_view;
+    data["length"] = scalar_view("length", edge_length);
+    data["quad_points"] = quad_points;
+    data["neighbor_elem"] = scalar_view("neighbor_elem", neighbor_info.first);
+    data["neighbor_face"] = scalar_view("neighbor_face", neighbor_info.second);
+    data["is_boundary"] = scalar_view("is_boundary", (neighbor_info.first < 0) ? 1.0 : 0.0);
     data["dphi_dx_face"] = dphi_dx_face;
 
     return data;
 }
 
-Eigen::VectorXi DGSpace::compute_face_permutation(int elem1_face,
-                                                  const Eigen::MatrixXd& elem1_vertices,
-                                                  int elem2_face,
-                                                  const Eigen::MatrixXd& elem2_vertices) const {
+IView1 DGSpace::compute_face_permutation(int elem1_face, const DView2& elem1_vertices,
+                                         int elem2_face, const DView2& elem2_vertices) const {
     // Get face vertices
     auto [v1_1, v1_2] = ref_element_->edge_vertices(elem1_face);
     auto [v2_1, v2_2] = ref_element_->edge_vertices(elem2_face);
 
-    Eigen::Vector2d edge1_v1 = elem1_vertices.row(v1_1);
-    Eigen::Vector2d edge1_v2 = elem1_vertices.row(v1_2);
-    Eigen::Vector2d edge2_v1 = elem2_vertices.row(v2_1);
-    Eigen::Vector2d edge2_v2 = elem2_vertices.row(v2_2);
+    Vec2 edge1_v1 = row2(elem1_vertices, v1_1);
+    Vec2 edge1_v2 = row2(elem1_vertices, v1_2);
+    Vec2 edge2_v1 = row2(elem2_vertices, v2_1);
+    Vec2 edge2_v2 = row2(elem2_vertices, v2_2);
 
     double tol = 1e-10;
     int n_quad = face_quad_->size();
 
     // Compute edge tangent vectors
-    Eigen::Vector2d tangent1 = edge1_v2 - edge1_v1;
-    Eigen::Vector2d tangent2 = edge2_v2 - edge2_v1;
+    Vec2 tangent1 = edge1_v2 - edge1_v1;
+    Vec2 tangent2 = edge2_v2 - edge2_v1;
 
     // Check if edges are oriented in opposite directions
     // First check geometric coincidence (for non-periodic faces)
     bool vertices_match_reversed =
-        (edge1_v1 - edge2_v2).norm() < tol && (edge1_v2 - edge2_v1).norm() < tol;
-    bool vertices_match_same =
-        (edge1_v1 - edge2_v1).norm() < tol && (edge1_v2 - edge2_v2).norm() < tol;
+        norm(edge1_v1 - edge2_v2) < tol && norm(edge1_v2 - edge2_v1) < tol;
+    bool vertices_match_same = norm(edge1_v1 - edge2_v1) < tol && norm(edge1_v2 - edge2_v2) < tol;
 
     bool reverse_orientation = false;
 
@@ -206,25 +220,27 @@ Eigen::VectorXi DGSpace::compute_face_permutation(int elem1_face,
         // Periodic case: edges are geometrically far apart
         // Check if tangent vectors point in opposite directions
         // For periodic boundaries, tangents should be parallel or anti-parallel
-        tangent1.normalize();
-        tangent2.normalize();
-        double dot_product = tangent1.dot(tangent2);
+        tangent1 = normalized(tangent1);
+        tangent2 = normalized(tangent2);
+        double dot_product = dot(tangent1, tangent2);
 
         // If dot product is negative, edges point in opposite directions
         reverse_orientation = (dot_product < 0.0);
     }
 
+    IView1 perm("face_permutation", n_quad);
     if (reverse_orientation) {
         // Reverse order
-        Eigen::VectorXi perm(n_quad);
         for (int i = 0; i < n_quad; ++i) {
             perm[i] = n_quad - 1 - i;
         }
-        return perm;
     } else {
         // Same order
-        return Eigen::VectorXi::LinSpaced(n_quad, 0, n_quad - 1);
+        for (int i = 0; i < n_quad; ++i) {
+            perm[i] = i;
+        }
     }
+    return perm;
 }
 
 void DGSpace::precompute_basis_values() {
@@ -233,52 +249,62 @@ void DGSpace::precompute_basis_values() {
     int n_basis = basis_->get_n_basis();
     int n_faces = ref_element_->get_n_edges();
 
-    // Volume basis values and gradients
-    phi_vol_.resize(n_vol_quad, n_basis);
+    // Volume basis values and gradients (independent across q).
+    phi_vol_ = DView2("phi_vol", n_vol_quad, n_basis);
     dphi_vol_.resize(n_vol_quad);
 
-    for (int q = 0; q < n_vol_quad; ++q) {
-        Eigen::Vector2d xi = volume_quad_->points.row(q);
-        phi_vol_.row(q) = basis_->evaluate(xi);
+    Kokkos::parallel_for("precompute_volume_basis_values", n_vol_quad, [&](const int q) {
+        Vec2 xi = row2(volume_quad_->points, q);
+        DView1 phi_q = basis_->evaluate(xi);
+        for (int i = 0; i < n_basis; ++i) {
+            phi_vol_(q, i) = phi_q[i];
+        }
         dphi_vol_[q] = basis_->evaluate_gradient(xi);
-    }
+    });
 
-    // Face basis values
+    // Face basis values: (face, q) is a genuinely independent 2D index space, so use
+    // MDRangePolicy. Pre-allocate each face's view first since the per-face DView2
+    // construction itself isn't part of the independent (face, q) fill.
     phi_face_.resize(n_faces);
     for (int face = 0; face < n_faces; ++face) {
-        phi_face_[face].resize(n_face_quad, n_basis);
-
-        for (int q = 0; q < n_face_quad; ++q) {
-            double s = face_quad_->points(q, 0);
-            Eigen::Vector2d xi_face = map_face_quad_point(face, s);
-            phi_face_[face].row(q) = basis_->evaluate(xi_face);
-        }
+        phi_face_[face] = DView2("phi_face", n_face_quad, n_basis);
     }
+
+    Kokkos::parallel_for("precompute_face_basis_values",
+                         Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {n_faces, n_face_quad}),
+                         [&](const int face, const int q) {
+                             double s = face_quad_->points(q, 0);
+                             Vec2 xi_face = map_face_quad_point(face, s);
+                             DView1 phi_q = basis_->evaluate(xi_face);
+                             for (int i = 0; i < n_basis; ++i) {
+                                 phi_face_[face](q, i) = phi_q[i];
+                             }
+                         });
 }
 
-Eigen::Vector2d DGSpace::map_face_quad_point(int face_id, double s) const {
+Vec2 DGSpace::map_face_quad_point(int face_id, double s) const {
     if (element_type_ == "triangle") {
         double t = 0.5 * (s + 1.0);  // Map [-1,1] to [0,1]
         switch (face_id) {
         case 0:
-            return Eigen::Vector2d(t, 0.0);  // Bottom edge
+            return Vec2{t, 0.0};  // Bottom edge
         case 1:
-            return Eigen::Vector2d(1.0 - t, t);  // Diagonal edge
+            return Vec2{1.0 - t, t};  // Diagonal edge
         case 2:
-            return Eigen::Vector2d(0.0, 1.0 - t);  // Left edge
+            return Vec2{0.0, 1.0 - t};  // Left edge
         default:
             throw std::out_of_range("Invalid face for triangle");
         }
     } else if (element_type_ == "quad") {
         switch (face_id) {
         case 0:
-            return Eigen::Vector2d(s, -1.0);  // Bottom edge
+            return Vec2{s, -1.0};  // Bottom edge
         case 1:
-            return Eigen::Vector2d(1.0, s);  // Right edge
+            return Vec2{1.0, s};  // Right edge
         case 2:
-            return Eigen::Vector2d(-s, 1.0);  // Top edge (note -s)
+            return Vec2{-s, 1.0};  // Top edge (note -s)
         case 3:
-            return Eigen::Vector2d(-1.0, -s);  // Left edge (note -s)
+            return Vec2{-1.0, -s};  // Left edge (note -s)
         default:
             throw std::out_of_range("Invalid face for quad");
         }

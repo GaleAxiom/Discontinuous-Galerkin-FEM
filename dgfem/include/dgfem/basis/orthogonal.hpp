@@ -5,9 +5,8 @@
 
 #pragma once
 
+#include "dgfem/kokkos_math.hpp"
 #include "dgfem/reference/elements.hpp"
-
-#include <Eigen/Dense>
 
 #include <memory>
 #include <sstream>
@@ -48,14 +47,14 @@ public:
      * @param xi Reference coordinates
      * @return Vector of basis function values
      */
-    virtual Eigen::VectorXd evaluate(const Eigen::Vector2d& xi) const = 0;
+    virtual DView1 evaluate(const Vec2& xi) const = 0;
 
     /**
      * @brief Evaluate basis function gradients at reference point xi
      * @param xi Reference coordinates
      * @return Matrix where row i contains gradient of basis function i
      */
-    virtual Eigen::MatrixXd evaluate_gradient(const Eigen::Vector2d& xi) const = 0;
+    virtual DView2 evaluate_gradient(const Vec2& xi) const = 0;
 
     // Modern getters with [[nodiscard]]
     [[nodiscard]] constexpr int get_order() const noexcept { return order_; }
@@ -81,6 +80,30 @@ protected:
     std::shared_ptr<ReferenceElement> ref_element_;
     int order_;
     int n_basis_;
+};
+
+/**
+ * @brief Thin CRTP layer between OrthogonalBasis and each concrete basis (Legendre/
+ * Dubiner/Monomial). `DGSpace` only ever holds a `std::shared_ptr<OrthogonalBasis>`
+ * chosen at runtime, so the virtual boundary at `OrthogonalBasis` is preserved exactly
+ * -- this class exists purely to dispatch that one virtual call to each derived
+ * class's `*_impl` method via `static_cast`, which concrete classes implement as
+ * plain (non-virtual) member functions.
+ */
+template <typename Derived>
+class OrthogonalBasisCRTP : public OrthogonalBasis {
+public:
+    using OrthogonalBasis::OrthogonalBasis;
+
+    DView1 evaluate(const Vec2& xi) const final {
+        return static_cast<const Derived*>(this)->evaluate_impl(xi);
+    }
+    DView2 evaluate_gradient(const Vec2& xi) const final {
+        return static_cast<const Derived*>(this)->evaluate_gradient_impl(xi);
+    }
+    int compute_n_basis() const final {
+        return static_cast<const Derived*>(this)->compute_n_basis_impl();
+    }
 };
 
 }  // namespace dgfem

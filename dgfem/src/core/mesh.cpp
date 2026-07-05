@@ -10,18 +10,19 @@
 
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <stdexcept>
 
 namespace dgfem {
 
-DGMesh::DGMesh(const Eigen::MatrixXd& vertices, const Eigen::MatrixXi& elements,
-               const Eigen::VectorXi& element_tags, const std::map<std::string, int>& boundary_tags,
+DGMesh::DGMesh(const DView2& vertices, const IView2& elements, const IView1& element_tags,
+               const std::map<std::string, int>& boundary_tags,
                const std::map<int, std::vector<std::pair<int, int>>>& boundary_edges)
     : vertices_(vertices), elements_(elements), element_tags_(element_tags),
-      boundary_tags_(boundary_tags), n_elements_(elements.rows()) {
+      boundary_tags_(boundary_tags), n_elements_(elements.extent(0)) {
     // Determine element type
-    int n_nodes_per_elem = elements.cols();
+    int n_nodes_per_elem = elements.extent(1);
 
     if (n_nodes_per_elem == 3) {
         element_type_ = "triangle";
@@ -40,7 +41,7 @@ DGMesh::DGMesh(const Eigen::MatrixXd& vertices, const Eigen::MatrixXi& elements,
 
     // Build node-to-element mapping
     for (int i = 0; i < n_elements_; ++i) {
-        for (int j = 0; j < elements_.cols(); ++j) {
+        for (int j = 0; j < static_cast<int>(elements_.extent(1)); ++j) {
             int global_node_idx = elements_(i, j);
             node_to_elements_[global_node_idx].push_back({i, j});
         }
@@ -64,13 +65,9 @@ void DGMesh::initialize_dg_space(std::shared_ptr<DGSpace> dg_space, int n_variab
     element_data_.resize(n_elements_);
     face_data_.resize(n_elements_);
 
-    for (int elem_id = 0; elem_id < n_elements_; ++elem_id) {
+    Kokkos::parallel_for("initialize_dg_space_element_data", n_elements_, [&](const int elem_id) {
         // Get element vertices
-        Eigen::MatrixXd elem_vertices(elements_.cols(), 2);
-        for (int i = 0; i < elements_.cols(); ++i) {
-            int vertex_idx = elements_(elem_id, i);
-            elem_vertices.row(i) = vertices_.row(vertex_idx);
-        }
+        DView2 elem_vertices = get_element_vertices(elem_id);
 
         // Get face neighbors
         std::vector<std::pair<int, int>> neighbors = get_element_neighbors(elem_id);
@@ -82,13 +79,14 @@ void DGMesh::initialize_dg_space(std::shared_ptr<DGSpace> dg_space, int n_variab
         face_data_[elem_id].resize(n_faces_per_elem_);
 
         for (int face_id = 0; face_id < n_faces_per_elem_; ++face_id) {
-            std::pair<int, int> neighbor =
-                (face_id < neighbors.size()) ? neighbors[face_id] : std::make_pair(-1, -1);
+            std::pair<int, int> neighbor = (face_id < static_cast<int>(neighbors.size()))
+                                               ? neighbors[face_id]
+                                               : std::make_pair(-1, -1);
 
             face_data_[elem_id][face_id] =
                 dg_space_->compute_face_data(elem_vertices, face_id, neighbor);
         }
-    }
+    });
 
     std::cout << "Initialized DG space with order " << dg_space->get_order() << ", "
               << dg_space->get_basis()->get_n_basis() << " basis functions per element"
@@ -111,7 +109,16 @@ std::vector<std::pair<int, int>> DGMesh::get_element_neighbors(int elem_id) cons
     return neighbors;
 }
 
-const std::map<std::string, Eigen::MatrixXd>& DGMesh::get_element_data(int elem_id) const {
+DView2 DGMesh::get_element_vertices(int elem_id) const {
+    const int n_verts = static_cast<int>(elements_.extent(1));
+    DView2 verts("element_vertices", n_verts, 2);
+    for (int i = 0; i < n_verts; ++i) {
+        set_row2(verts, i, row2(vertices_, elements_(elem_id, i)));
+    }
+    return verts;
+}
+
+const std::map<std::string, DView2>& DGMesh::get_element_data(int elem_id) const {
     if (!dg_space_) {
         throw std::runtime_error("DG space not initialized");
     }
@@ -121,98 +128,43 @@ const std::map<std::string, Eigen::MatrixXd>& DGMesh::get_element_data(int elem_
     return element_data_[elem_id];
 }
 
-const std::map<std::string, Eigen::VectorXd>& DGMesh::get_face_data(int elem_id,
-                                                                    int face_id) const {
+const std::map<std::string, DView2>& DGMesh::get_element_face_data(int elem_id, int face_id) const {
     if (!dg_space_) {
-        std::cerr << "ERROR [get_face_data]: DG space not initialized!" << std::endl;
+        std::cerr << "ERROR [get_element_face_data]: DG space not initialized!" << std::endl;
         throw std::runtime_error("DG space not initialized");
     }
     if (elem_id < 0 || elem_id >= n_elements_) {
-        std::cerr << "ERROR [get_face_data]: Element index " << elem_id << " out of range [0, "
-                  << n_elements_ << ")" << std::endl;
         throw std::out_of_range("Element index out of range");
     }
     if (face_id < 0 || face_id >= n_faces_per_elem_) {
-        std::cerr << "ERROR [get_face_data]: Face index " << face_id << " out of range [0, "
-                  << n_faces_per_elem_ << ")" << std::endl;
         throw std::out_of_range("Face index out of range");
     }
-
-    // Check if face_data_ is properly sized
-    if (elem_id >= static_cast<int>(face_data_.size())) {
-        std::cerr << "ERROR [get_face_data]: face_data_ size is " << face_data_.size()
-                  << " but trying to access elem_id " << elem_id << std::endl;
-        throw std::out_of_range("face_data_ not properly sized for element");
+    if (elem_id >= static_cast<int>(face_data_.size()) ||
+        face_id >= static_cast<int>(face_data_[elem_id].size())) {
+        throw std::out_of_range("face_data_ not properly sized");
     }
 
-    if (face_id >= static_cast<int>(face_data_[elem_id].size())) {
-        std::cerr << "ERROR [get_face_data]: face_data_[" << elem_id << "] size is "
-                  << face_data_[elem_id].size() << " but trying to access face_id " << face_id
-                  << std::endl;
-        throw std::out_of_range("face_data_ not properly sized for face");
+    // face_data_ already holds "phi"/"weights" once precompute_basis_values() has run on the
+    // DGSpace, EXCEPT this per-face-instance map (from compute_face_data) doesn't include
+    // those two DGSpace-level (not per-instance) precomputed values -- add them once, lazily,
+    // matching what the old Eigen VectorXd->MatrixXd conversion cache used to bolt on.
+    auto& face_map = const_cast<DGMesh*>(this)->face_data_[elem_id][face_id];
+    if (face_map.find("phi") == face_map.end()) {
+        const auto& phi_face_all = dg_space_->get_face_basis_values();
+        if (face_id < static_cast<int>(phi_face_all.size())) {
+            face_map["phi"] = phi_face_all[face_id];
+        }
+
+        const auto& face_quad = dg_space_->get_face_quad();
+        int n_quad = face_quad->weights.extent(0);
+        DView2 weights_mat("weights", n_quad, 1);
+        for (int q = 0; q < n_quad; ++q) {
+            weights_mat(q, 0) = face_quad->weights[q];
+        }
+        face_map["weights"] = weights_mat;
     }
 
     return face_data_[elem_id][face_id];
-}
-
-const std::map<std::string, Eigen::MatrixXd>& DGMesh::get_element_face_data(int elem_id,
-                                                                            int face_id) const {
-    if (!dg_space_) {
-        throw std::runtime_error("DG space not initialized");
-    }
-    if (elem_id < 0 || elem_id >= n_elements_) {
-        throw std::out_of_range("Element index out of range");
-    }
-    if (face_id < 0 || face_id >= n_faces_per_elem_) {
-        throw std::out_of_range("Face index out of range");
-    }
-
-    // Lazily compute face_data_matrix_ if not already done
-    if (face_data_matrix_.empty()) {
-        const_cast<DGMesh*>(this)->face_data_matrix_.resize(n_elements_);
-        for (int e = 0; e < n_elements_; ++e) {
-            const_cast<DGMesh*>(this)->face_data_matrix_[e].resize(n_faces_per_elem_);
-        }
-    }
-
-    // Convert face_data_ (VectorXd) to face_data_matrix_ (MatrixXd) format if needed
-    if (face_data_matrix_[elem_id][face_id].empty()) {
-        const auto& face_vec_data = face_data_[elem_id][face_id];
-        auto& face_mat_data = const_cast<DGMesh*>(this)->face_data_matrix_[elem_id][face_id];
-
-        for (const auto& pair : face_vec_data) {
-            const std::string& key = pair.first;
-            const Eigen::VectorXd& vec = pair.second;
-
-            if (key == "dphi_dx_face") {
-                int n_face_quad = dg_space_->get_face_quad()->size();
-                int n_basis = dg_space_->get_basis()->get_n_basis();
-                if (vec.size() != n_face_quad * n_basis * 2) {
-                    throw std::runtime_error("Unexpected size for dphi_dx_face data");
-                }
-                face_mat_data[key] =
-                    Eigen::Map<const Eigen::MatrixXd>(vec.data(), n_face_quad * n_basis, 2);
-            } else {
-                // Convert vector to single-column matrix
-                face_mat_data[key] = vec.reshaped(vec.size(), 1);
-            }
-        }
-
-        // Add phi (basis function values at face quadrature points) from DGSpace
-        const auto& phi_face_all = dg_space_->get_face_basis_values();
-        if (face_id < static_cast<int>(phi_face_all.size())) {
-            face_mat_data["phi"] = phi_face_all[face_id];
-        }
-
-        // Add quadrature weights as a column vector in MatrixXd format
-        const auto& face_quad = dg_space_->get_face_quad();
-        int n_quad = face_quad->weights.size();
-        Eigen::MatrixXd weights_mat(n_quad, 1);
-        weights_mat.col(0) = face_quad->weights;
-        face_mat_data["weights"] = weights_mat;
-    }
-
-    return face_data_matrix_[elem_id][face_id];
 }
 
 void DGMesh::set_boundary_condition(std::string_view tag_name,
@@ -311,7 +263,8 @@ bool DGMesh::is_boundary_face(int elem_id, int face_id) const noexcept {
 
 void DGMesh::build_face_connectivity() {
     std::cout << "Building face connectivity..." << std::endl;
-    face_neighbors_ = Eigen::MatrixXi::Constant(n_elements_, n_faces_per_elem_ * 2, -1);
+    face_neighbors_ = IView2("face_neighbors", n_elements_, n_faces_per_elem_ * 2);
+    Kokkos::deep_copy(face_neighbors_, -1);
 
     std::map<std::pair<int, int>, std::vector<std::pair<int, int>>> face_map;
     // Build face signature map
@@ -419,10 +372,7 @@ void DGMesh::build_precomputed_faces() {
         auto neighbors = get_element_neighbors(elem_L);
 
         // Get element L vertices once
-        Eigen::MatrixXd vertices_L(elements_.cols(), 2);
-        for (int i = 0; i < elements_.cols(); ++i) {
-            vertices_L.row(i) = vertices_.row(elements_(elem_L, i));
-        }
+        DView2 vertices_L = get_element_vertices(elem_L);
 
         for (int face_L = 0; face_L < static_cast<int>(neighbors.size()); ++face_L) {
             int elem_R = neighbors[face_L].first;
@@ -445,10 +395,7 @@ void DGMesh::build_precomputed_faces() {
                     fc.vertices_L = vertices_L;
 
                     // Get element R vertices
-                    fc.vertices_R.resize(elements_.cols(), 2);
-                    for (int i = 0; i < elements_.cols(); ++i) {
-                        fc.vertices_R.row(i) = vertices_.row(elements_(elem_R, i));
-                    }
+                    fc.vertices_R = get_element_vertices(elem_R);
 
                     // Compute and cache permutation
                     fc.permutation = dg_space_->compute_face_permutation(face_L, fc.vertices_L,
@@ -525,19 +472,15 @@ void DGMesh::set_periodic_boundaries(std::string_view tag_name_1, std::string_vi
 
         // Get face center for face_1
         const auto& verts_1 = face_to_vertices_.at(face_1);
-        Eigen::Vector2d center_1 = 0.5 * (vertices_.row(verts_1[0]) + vertices_.row(verts_1[1]));
+        Vec2 center_1 = 0.5 * (row2(vertices_, verts_1[0]) + row2(vertices_, verts_1[1]));
 
         // Find matching face on boundary 2
         double min_dist = std::numeric_limits<double>::max();
         std::pair<int, int> best_match = {-1, -1};
 
         for (const auto& face_2 : faces_2) {
-            int elem_2 = face_2.first;
-            int local_face_2 = face_2.second;
-
             const auto& verts_2 = face_to_vertices_.at(face_2);
-            Eigen::Vector2d center_2 =
-                0.5 * (vertices_.row(verts_2[0]) + vertices_.row(verts_2[1]));
+            Vec2 center_2 = 0.5 * (row2(vertices_, verts_2[0]) + row2(vertices_, verts_2[1]));
 
             // For periodic boundaries, we match faces with similar transverse coordinate
             // Left-Right: match y-coordinates
@@ -545,9 +488,9 @@ void DGMesh::set_periodic_boundaries(std::string_view tag_name_1, std::string_vi
             double dist;
             if (tag_str_1 == "Left" || tag_str_1 == "Right" || tag_str_2 == "Left" ||
                 tag_str_2 == "Right") {
-                dist = std::abs(center_1.y() - center_2.y());
+                dist = std::abs(center_1[1] - center_2[1]);
             } else {
-                dist = std::abs(center_1.x() - center_2.x());
+                dist = std::abs(center_1[0] - center_2[0]);
             }
 
             if (dist < min_dist) {
@@ -576,7 +519,7 @@ void DGMesh::set_periodic_boundaries(std::string_view tag_name_1, std::string_vi
               << std::endl;
 
     // Mark periodic boundary conditions
-    Eigen::Vector4d zero_vec = Eigen::Vector4d::Zero();
+    Vec4 zero_vec{0.0, 0.0, 0.0, 0.0};
     auto periodic_bc = std::make_shared<BoundaryConditionEuler>(BCTypeEuler::PERIODIC, zero_vec);
     boundary_conditions_euler_[tag_str_1] = periodic_bc;
     boundary_conditions_euler_[tag_str_2] = periodic_bc;

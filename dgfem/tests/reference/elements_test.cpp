@@ -1,4 +1,4 @@
-#include <Eigen/Dense>
+#include <dgfem/kokkos_math.hpp>
 #include <dgfem/reference/elements.hpp>
 
 #include <gmock/gmock.h>
@@ -6,6 +6,21 @@
 
 using namespace dgfem;
 using namespace testing;
+
+namespace {
+double sum(const DView1& v) {
+    double s = 0.0;
+    for (int i = 0; i < static_cast<int>(v.extent(0)); ++i)
+        s += v(i);
+    return s;
+}
+double col_sum(const DView2& m, int col) {
+    double s = 0.0;
+    for (int i = 0; i < static_cast<int>(m.extent(0)); ++i)
+        s += m(i, col);
+    return s;
+}
+}  // namespace
 
 TEST(ReferenceTriangleTest, VertexCount) {
     ReferenceTriangle tri;
@@ -31,15 +46,15 @@ TEST(ReferenceTriangleTest, ContainsPoint) {
     ReferenceTriangle tri;
 
     // Test points inside
-    EXPECT_TRUE(tri.contains_point(Eigen::Vector2d(0.0, 0.0)));    // vertex
-    EXPECT_TRUE(tri.contains_point(Eigen::Vector2d(1.0, 0.0)));    // vertex
-    EXPECT_TRUE(tri.contains_point(Eigen::Vector2d(0.0, 1.0)));    // vertex
-    EXPECT_TRUE(tri.contains_point(Eigen::Vector2d(0.25, 0.25)));  // interior
+    EXPECT_TRUE(tri.contains_point(Vec2{0.0, 0.0}));    // vertex
+    EXPECT_TRUE(tri.contains_point(Vec2{1.0, 0.0}));    // vertex
+    EXPECT_TRUE(tri.contains_point(Vec2{0.0, 1.0}));    // vertex
+    EXPECT_TRUE(tri.contains_point(Vec2{0.25, 0.25}));  // interior
 
     // Test points outside
-    EXPECT_FALSE(tri.contains_point(Eigen::Vector2d(-0.1, 0.0)));
-    EXPECT_FALSE(tri.contains_point(Eigen::Vector2d(0.0, -0.1)));
-    EXPECT_FALSE(tri.contains_point(Eigen::Vector2d(0.5, 0.6)));  // sum > 1
+    EXPECT_FALSE(tri.contains_point(Vec2{-0.1, 0.0}));
+    EXPECT_FALSE(tri.contains_point(Vec2{0.0, -0.1}));
+    EXPECT_FALSE(tri.contains_point(Vec2{0.5, 0.6}));  // sum > 1
 }
 
 TEST(ReferenceTriangleTest, EdgeVertices) {
@@ -64,15 +79,15 @@ TEST(ReferenceTriangleTest, ShapeFunctions) {
     ReferenceTriangle tri;
 
     // Test at vertices - nodal property (shape function i = 1 at vertex i, 0 elsewhere)
-    std::vector<Eigen::Vector2d> vertices = {
-        Eigen::Vector2d(0.0, 0.0),  // vertex 0
-        Eigen::Vector2d(1.0, 0.0),  // vertex 1
-        Eigen::Vector2d(0.0, 1.0)   // vertex 2
+    std::vector<Vec2> vertices = {
+        Vec2{0.0, 0.0},  // vertex 0
+        Vec2{1.0, 0.0},  // vertex 1
+        Vec2{0.0, 1.0}   // vertex 2
     };
 
     for (size_t v = 0; v < vertices.size(); ++v) {
-        Eigen::VectorXd N;
-        Eigen::MatrixXd dN_dxi;
+        DView1 N;
+        DView2 dN_dxi;
         tri.compute_shape_functions(vertices[v], N, dN_dxi);
 
         EXPECT_EQ(N.size(), 3) << "At vertex " << v;
@@ -88,26 +103,25 @@ TEST(ReferenceTriangleTest, ShapeFunctions) {
     }
 
     // Test partition of unity: sum of shape functions = 1
-    Eigen::Vector2d test_point(0.3, 0.4);
-    Eigen::VectorXd N;
-    Eigen::MatrixXd dN_dxi;
+    Vec2 test_point{0.3, 0.4};
+    DView1 N;
+    DView2 dN_dxi;
     tri.compute_shape_functions(test_point, N, dN_dxi);
 
-    double sum = N.sum();
-    EXPECT_NEAR(sum, 1.0, 1e-12) << "Partition of unity failed at interior point";
+    EXPECT_NEAR(sum(N), 1.0, 1e-12) << "Partition of unity failed at interior point";
 }
 
 // Test shape function gradients for triangles
 TEST(ReferenceTriangleTest, ShapeFunctionGradients) {
     ReferenceTriangle tri;
 
-    Eigen::Vector2d test_point(0.25, 0.35);
-    Eigen::VectorXd N;
-    Eigen::MatrixXd dN_dxi;
+    Vec2 test_point{0.25, 0.35};
+    DView1 N;
+    DView2 dN_dxi;
     tri.compute_shape_functions(test_point, N, dN_dxi);
 
-    EXPECT_EQ(dN_dxi.rows(), 3);
-    EXPECT_EQ(dN_dxi.cols(), 2);
+    EXPECT_EQ(dN_dxi.extent(0), 3);
+    EXPECT_EQ(dN_dxi.extent(1), 2);
 
     // For linear triangle: N = [1-x-y, x, y]
     // Gradients should be constant
@@ -119,10 +133,8 @@ TEST(ReferenceTriangleTest, ShapeFunctionGradients) {
     EXPECT_NEAR(dN_dxi(2, 1), 1.0, 1e-12);   // dN2/dy
 
     // Verify gradients sum to zero (constant field has zero gradient)
-    Eigen::VectorXd grad_sum_x = dN_dxi.col(0);
-    Eigen::VectorXd grad_sum_y = dN_dxi.col(1);
-    EXPECT_NEAR(grad_sum_x.sum(), 0.0, 1e-12);
-    EXPECT_NEAR(grad_sum_y.sum(), 0.0, 1e-12);
+    EXPECT_NEAR(col_sum(dN_dxi, 0), 0.0, 1e-12);
+    EXPECT_NEAR(col_sum(dN_dxi, 1), 0.0, 1e-12);
 }
 
 // Test project_to_bounds for triangles
@@ -130,27 +142,27 @@ TEST(ReferenceTriangleTest, ProjectToBounds) {
     ReferenceTriangle tri;
 
     // Point inside - should not change
-    Eigen::Vector2d inside(0.3, 0.4);
-    Eigen::Vector2d inside_copy = inside;
+    Vec2 inside{0.3, 0.4};
+    Vec2 inside_copy = inside;
     tri.project_to_bounds(inside);
-    EXPECT_NEAR((inside - inside_copy).norm(), 0.0, 1e-12);
+    EXPECT_NEAR(norm(inside - inside_copy), 0.0, 1e-12);
 
     // Point with x < 0
-    Eigen::Vector2d neg_x(-0.1, 0.5);
+    Vec2 neg_x{-0.1, 0.5};
     tri.project_to_bounds(neg_x);
-    EXPECT_GE(neg_x(0), 0.0);
-    EXPECT_LE(neg_x(0) + neg_x(1), 1.0);
+    EXPECT_GE(neg_x[0], 0.0);
+    EXPECT_LE(neg_x[0] + neg_x[1], 1.0);
 
     // Point with y < 0
-    Eigen::Vector2d neg_y(0.5, -0.1);
+    Vec2 neg_y{0.5, -0.1};
     tri.project_to_bounds(neg_y);
-    EXPECT_GE(neg_y(1), 0.0);
-    EXPECT_LE(neg_y(0) + neg_y(1), 1.0);
+    EXPECT_GE(neg_y[1], 0.0);
+    EXPECT_LE(neg_y[0] + neg_y[1], 1.0);
 
     // Point with x+y > 1
-    Eigen::Vector2d outside(0.7, 0.7);
+    Vec2 outside{0.7, 0.7};
     tri.project_to_bounds(outside);
-    EXPECT_LE(outside(0) + outside(1), 1.0 + 1e-10);  // Small tolerance for rounding
+    EXPECT_LE(outside[0] + outside[1], 1.0 + 1e-10);  // Small tolerance for rounding
 }
 
 TEST(ReferenceQuadTest, VertexCount) {
@@ -179,15 +191,15 @@ TEST(ReferenceQuadTest, ContainsPoint) {
     ReferenceQuad quad;
 
     // Test points inside
-    EXPECT_TRUE(quad.contains_point(Eigen::Vector2d(-1.0, -1.0)));  // vertex
-    EXPECT_TRUE(quad.contains_point(Eigen::Vector2d(1.0, -1.0)));   // vertex
-    EXPECT_TRUE(quad.contains_point(Eigen::Vector2d(1.0, 1.0)));    // vertex
-    EXPECT_TRUE(quad.contains_point(Eigen::Vector2d(-1.0, 1.0)));   // vertex
-    EXPECT_TRUE(quad.contains_point(Eigen::Vector2d(0.0, 0.0)));    // center
+    EXPECT_TRUE(quad.contains_point(Vec2{-1.0, -1.0}));  // vertex
+    EXPECT_TRUE(quad.contains_point(Vec2{1.0, -1.0}));   // vertex
+    EXPECT_TRUE(quad.contains_point(Vec2{1.0, 1.0}));    // vertex
+    EXPECT_TRUE(quad.contains_point(Vec2{-1.0, 1.0}));   // vertex
+    EXPECT_TRUE(quad.contains_point(Vec2{0.0, 0.0}));    // center
 
     // Test points outside
-    EXPECT_FALSE(quad.contains_point(Eigen::Vector2d(-1.1, 0.0)));
-    EXPECT_FALSE(quad.contains_point(Eigen::Vector2d(0.0, 1.1)));
+    EXPECT_FALSE(quad.contains_point(Vec2{-1.1, 0.0}));
+    EXPECT_FALSE(quad.contains_point(Vec2{0.0, 1.1}));
 }
 
 TEST(ReferenceQuadTest, EdgeVertices) {
@@ -216,16 +228,16 @@ TEST(ReferenceQuadTest, ShapeFunctions) {
     ReferenceQuad quad;
 
     // Test at vertices - nodal property
-    std::vector<Eigen::Vector2d> vertices = {
-        Eigen::Vector2d(-1.0, -1.0),  // vertex 0
-        Eigen::Vector2d(1.0, -1.0),   // vertex 1
-        Eigen::Vector2d(1.0, 1.0),    // vertex 2
-        Eigen::Vector2d(-1.0, 1.0)    // vertex 3
+    std::vector<Vec2> vertices = {
+        Vec2{-1.0, -1.0},  // vertex 0
+        Vec2{1.0, -1.0},   // vertex 1
+        Vec2{1.0, 1.0},    // vertex 2
+        Vec2{-1.0, 1.0}    // vertex 3
     };
 
     for (size_t v = 0; v < vertices.size(); ++v) {
-        Eigen::VectorXd N;
-        Eigen::MatrixXd dN_dxi;
+        DView1 N;
+        DView2 dN_dxi;
         quad.compute_shape_functions(vertices[v], N, dN_dxi);
 
         EXPECT_EQ(N.size(), 4) << "At vertex " << v;
@@ -241,13 +253,12 @@ TEST(ReferenceQuadTest, ShapeFunctions) {
     }
 
     // Test partition of unity at center
-    Eigen::Vector2d center(0.0, 0.0);
-    Eigen::VectorXd N_center;
-    Eigen::MatrixXd dN_center;
+    Vec2 center{0.0, 0.0};
+    DView1 N_center;
+    DView2 dN_center;
     quad.compute_shape_functions(center, N_center, dN_center);
 
-    double sum = N_center.sum();
-    EXPECT_NEAR(sum, 1.0, 1e-12) << "Partition of unity failed at center";
+    EXPECT_NEAR(sum(N_center), 1.0, 1e-12) << "Partition of unity failed at center";
 
     // At center, all shape functions should be equal (by symmetry)
     for (int i = 0; i < 4; ++i) {
@@ -260,13 +271,13 @@ TEST(ReferenceQuadTest, ShapeFunctionGradients) {
     ReferenceQuad quad;
 
     // Test at center (0, 0)
-    Eigen::Vector2d center(0.0, 0.0);
-    Eigen::VectorXd N;
-    Eigen::MatrixXd dN_dxi;
+    Vec2 center{0.0, 0.0};
+    DView1 N;
+    DView2 dN_dxi;
     quad.compute_shape_functions(center, N, dN_dxi);
 
-    EXPECT_EQ(dN_dxi.rows(), 4);
-    EXPECT_EQ(dN_dxi.cols(), 2);
+    EXPECT_EQ(dN_dxi.extent(0), 4);
+    EXPECT_EQ(dN_dxi.extent(1), 2);
 
     // At center, bilinear shape functions have specific gradients
     // N0 = 0.25(1-x)(1-y) => dN0/dx = -0.25(1-y) = -0.25 at (0,0)
@@ -280,8 +291,8 @@ TEST(ReferenceQuadTest, ShapeFunctionGradients) {
     EXPECT_NEAR(dN_dxi(3, 1), 0.25, 1e-12);
 
     // Gradients should sum to zero
-    EXPECT_NEAR(dN_dxi.col(0).sum(), 0.0, 1e-12);
-    EXPECT_NEAR(dN_dxi.col(1).sum(), 0.0, 1e-12);
+    EXPECT_NEAR(col_sum(dN_dxi, 0), 0.0, 1e-12);
+    EXPECT_NEAR(col_sum(dN_dxi, 1), 0.0, 1e-12);
 }
 
 // Test project_to_bounds for quads
@@ -289,49 +300,49 @@ TEST(ReferenceQuadTest, ProjectToBounds) {
     ReferenceQuad quad;
 
     // Point inside - should not change
-    Eigen::Vector2d inside(0.3, -0.4);
-    Eigen::Vector2d inside_copy = inside;
+    Vec2 inside{0.3, -0.4};
+    Vec2 inside_copy = inside;
     quad.project_to_bounds(inside);
-    EXPECT_NEAR((inside - inside_copy).norm(), 0.0, 1e-12);
+    EXPECT_NEAR(norm(inside - inside_copy), 0.0, 1e-12);
 
     // Point outside x > 1
-    Eigen::Vector2d large_x(1.5, 0.0);
+    Vec2 large_x{1.5, 0.0};
     quad.project_to_bounds(large_x);
-    EXPECT_LE(large_x(0), 1.0);
-    EXPECT_GE(large_x(0), -1.0);
+    EXPECT_LE(large_x[0], 1.0);
+    EXPECT_GE(large_x[0], -1.0);
 
     // Point outside x < -1
-    Eigen::Vector2d small_x(-1.5, 0.0);
+    Vec2 small_x{-1.5, 0.0};
     quad.project_to_bounds(small_x);
-    EXPECT_LE(small_x(0), 1.0);
-    EXPECT_GE(small_x(0), -1.0);
+    EXPECT_LE(small_x[0], 1.0);
+    EXPECT_GE(small_x[0], -1.0);
 
     // Point outside y bounds
-    Eigen::Vector2d outside_y(0.0, 2.0);
+    Vec2 outside_y{0.0, 2.0};
     quad.project_to_bounds(outside_y);
-    EXPECT_LE(outside_y(1), 1.0);
-    EXPECT_GE(outside_y(1), -1.0);
+    EXPECT_LE(outside_y[1], 1.0);
+    EXPECT_GE(outside_y[1], -1.0);
 }
 
 // Test polymorphic behavior through base class
 TEST(ReferenceElementTest, PolymorphicShapeFunctions) {
     // Test triangle through base class pointer
     std::shared_ptr<ReferenceElement> tri = std::make_shared<ReferenceTriangle>();
-    Eigen::Vector2d pt_tri(0.3, 0.4);
-    Eigen::VectorXd N_tri;
-    Eigen::MatrixXd dN_tri;
+    Vec2 pt_tri{0.3, 0.4};
+    DView1 N_tri;
+    DView2 dN_tri;
 
     tri->compute_shape_functions(pt_tri, N_tri, dN_tri);
     EXPECT_EQ(N_tri.size(), 3);
-    EXPECT_NEAR(N_tri.sum(), 1.0, 1e-12);
+    EXPECT_NEAR(sum(N_tri), 1.0, 1e-12);
 
     // Test quad through base class pointer
     std::shared_ptr<ReferenceElement> quad = std::make_shared<ReferenceQuad>();
-    Eigen::Vector2d pt_quad(0.2, -0.3);
-    Eigen::VectorXd N_quad;
-    Eigen::MatrixXd dN_quad;
+    Vec2 pt_quad{0.2, -0.3};
+    DView1 N_quad;
+    DView2 dN_quad;
 
     quad->compute_shape_functions(pt_quad, N_quad, dN_quad);
     EXPECT_EQ(N_quad.size(), 4);
-    EXPECT_NEAR(N_quad.sum(), 1.0, 1e-12);
+    EXPECT_NEAR(sum(N_quad), 1.0, 1e-12);
 }

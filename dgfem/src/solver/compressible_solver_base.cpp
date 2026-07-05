@@ -40,28 +40,31 @@ CompressibleDGSolverBase::assemble_residual(const StateVector& u_coeffs) const {
 
 void CompressibleDGSolverBase::compute_mass_matrix_inverse_blocks() {
     int n_elem = mesh_->get_n_elements();
-    M_inv_blocks_.clear();
-    M_inv_blocks_.reserve(n_elem);
+    // Pre-size then index-write rather than push_back inside the loop: push_back is not
+    // index-safe under any real parallel backend, even though it's fine on Serial.
+    M_inv_blocks_.assign(n_elem, DView2{});
 
-    for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
+    Kokkos::parallel_for("compute_mass_inv_blocks", n_elem, [&](const int elem_id) {
         const auto& elem_data = mesh_->get_element_data(elem_id);
-        Eigen::MatrixXd M_local =
-            weak_form_->compute_mass_integral(elem_data, mesh_->get_dg_space());
-        M_inv_blocks_.push_back(M_local.inverse());
-    }
+        DView2 M_local = weak_form_->compute_mass_integral(elem_data, mesh_->get_dg_space());
+        M_inv_blocks_[elem_id] = invert_dense(M_local);
+    });
 }
 
 CompressibleDGSolverBase::StateVector
 CompressibleDGSolverBase::apply_mass_inv(const StateVector& vec) const {
     StateVector result(vec.size());
     for (size_t elem_id = 0; elem_id < vec.size(); ++elem_id) {
-        result[elem_id] = M_inv_blocks_[elem_id] * vec[elem_id];
+        const DView2& M_inv = M_inv_blocks_[elem_id];
+        const DView2& v = vec[elem_id];
+        result[elem_id] = DView2("mass_inv_result", v.extent(0), v.extent(1));
+        gemm('N', 'N', 1.0, M_inv, v, 0.0, result[elem_id]);
     }
     return result;
 }
 
-CompressibleDGSolverBase::StateVector CompressibleDGSolverBase::project_initial_condition(
-    std::function<Eigen::Vector4d(const Eigen::Vector2d&)> u0_func) {
+CompressibleDGSolverBase::StateVector
+CompressibleDGSolverBase::project_initial_condition(std::function<Vec4(const Vec2&)> u0_func) {
     int n_elem = mesh_->get_n_elements();
     int n_basis = mesh_->get_dg_space()->get_basis()->get_n_basis();
     int n_vars = weak_form_->get_n_vars();
@@ -69,35 +72,35 @@ CompressibleDGSolverBase::StateVector CompressibleDGSolverBase::project_initial_
     auto dg_space = mesh_->get_dg_space();
     auto mapping = dg_space->get_mapping();
 
-    StateVector F_proj(n_elem, Eigen::MatrixXd::Zero(n_basis, n_vars));
+    StateVector F_proj;
+    F_proj.reserve(n_elem);
 
     for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
         const auto& elem_data = mesh_->get_element_data(elem_id);
 
-        Eigen::MatrixXd vertices(mesh_->get_elements().cols(), 2);
-        for (int i = 0; i < mesh_->get_elements().cols(); ++i) {
-            vertices.row(i) = mesh_->get_vertices().row(mesh_->get_elements()(elem_id, i));
-        }
+        DView2 vertices = mesh_->get_element_vertices(elem_id);
 
-        const Eigen::VectorXd& weights = dg_space->get_volume_quad()->weights;
-        const Eigen::MatrixXd& phi = dg_space->get_volume_basis_values();
-        const Eigen::VectorXd& J_det = elem_data.at("J_det_vol");
+        const DView1& weights = dg_space->get_volume_quad()->weights;
+        const DView2& phi = dg_space->get_volume_basis_values();
+        const DView2& J_det = elem_data.at("J_det_vol");
 
-        int n_quad = weights.size();
-        Eigen::MatrixXd F_local = Eigen::MatrixXd::Zero(n_basis, n_vars);
+        int n_quad = static_cast<int>(weights.size());
+        DView2 F_local("F_local", n_basis, n_vars);
 
         for (int q = 0; q < n_quad; ++q) {
-            Eigen::Vector2d xi_q = dg_space->get_volume_quad()->points.row(q);
-            Eigen::Vector2d x_q = mapping->map_to_physical(vertices, xi_q);
-            Eigen::Vector4d U_q = u0_func(x_q);
-            double w_q = weights[q] * std::abs(J_det[q]);
+            Vec2 xi_q = row2(dg_space->get_volume_quad()->points, q);
+            Vec2 x_q = mapping->map_to_physical(vertices, xi_q);
+            Vec4 U_q = u0_func(x_q);
+            double w_q = weights[q] * std::abs(J_det(q, 0));
 
             for (int i = 0; i < n_basis; ++i) {
-                F_local.row(i) += w_q * phi(q, i) * U_q.transpose();
+                for (int v = 0; v < n_vars; ++v) {
+                    F_local(i, v) += w_q * phi(q, i) * U_q[v];
+                }
             }
         }
 
-        F_proj[elem_id] = F_local;
+        F_proj.push_back(F_local);
     }
 
     return apply_mass_inv(F_proj);
@@ -113,82 +116,104 @@ CompressibleDGSolverBase::time_step_ssp_rk3(const StateVector& u_n, double dt) c
 
 double CompressibleDGSolverBase::compute_max_cfl(const StateVector& u_coeffs, double dt) const {
     int n_elem = mesh_->get_n_elements();
-    double max_cfl = 0.0;
 
     auto dg_space = mesh_->get_dg_space();
-    const Eigen::MatrixXd& phi = dg_space->get_volume_basis_values();
-    int n_quad = phi.rows();
+    const DView2& phi = dg_space->get_volume_basis_values();
+    int n_quad = static_cast<int>(phi.extent(0));
 
-    for (int elem_id = 0; elem_id < n_elem; ++elem_id) {
-        Eigen::MatrixXd vertices(mesh_->get_elements().cols(), 2);
-        for (int i = 0; i < mesh_->get_elements().cols(); ++i) {
-            vertices.row(i) = mesh_->get_vertices().row(mesh_->get_elements()(elem_id, i));
-        }
+    double max_cfl = 0.0;
+    int invalid_found = 0;
 
-        double h_elem = std::numeric_limits<double>::max();
-        for (int i = 0; i < vertices.rows(); ++i) {
-            for (int j = i + 1; j < vertices.rows(); ++j) {
-                double dist = (vertices.row(i) - vertices.row(j)).norm();
-                h_elem = std::min(h_elem, dist);
-            }
-        }
+    // Two reduction targets in one parallel_reduce: the CFL max, and a flag for
+    // "invalid density/pressure encountered" -- the original code short-circuited with
+    // `return infinity` from inside the per-element loop, which a reduce lambda can't do
+    // (it can only return from itself, not the enclosing function), so the invalid case
+    // is tracked as a second reduced value and checked once the reduce completes.
+    Kokkos::parallel_reduce(
+        "compute_max_cfl", n_elem,
+        [&](const int elem_id, double& local_max, int& local_invalid) {
+            DView2 vertices = mesh_->get_element_vertices(elem_id);
+            int n_verts = static_cast<int>(vertices.extent(0));
 
-        double max_wave_speed = 0.0;
-        Eigen::MatrixXd U_quad = phi * u_coeffs[elem_id];
-
-        for (int q = 0; q < n_quad; ++q) {
-            double rho = U_quad(q, 0);
-            double rho_u = U_quad(q, 1);
-            double rho_v = U_quad(q, 2);
-            double E = U_quad(q, 3);
-
-            if (rho <= 0.0 || !std::isfinite(rho)) {
-                return std::numeric_limits<double>::infinity();
+            double h_elem = std::numeric_limits<double>::max();
+            for (int i = 0; i < n_verts; ++i) {
+                for (int j = i + 1; j < n_verts; ++j) {
+                    double dist = norm(row2(vertices, i) - row2(vertices, j));
+                    h_elem = std::min(h_elem, dist);
+                }
             }
 
-            double u = rho_u / rho;
-            double v = rho_v / rho;
-            double kinetic = 0.5 * (u * u + v * v);
-            double p = (gamma_ - 1.0) * (E - rho * kinetic);
+            double max_wave_speed = 0.0;
+            const DView2& u_elem = u_coeffs[elem_id];
+            DView2 U_quad("U_quad", n_quad, static_cast<int>(u_elem.extent(1)));
+            gemm('N', 'N', 1.0, phi, u_elem, 0.0, U_quad);
 
-            if (p <= 0.0 || !std::isfinite(p)) {
-                return std::numeric_limits<double>::infinity();
+            for (int q = 0; q < n_quad; ++q) {
+                double rho = U_quad(q, 0);
+                double rho_u = U_quad(q, 1);
+                double rho_v = U_quad(q, 2);
+                double E = U_quad(q, 3);
+
+                if (rho <= 0.0 || !std::isfinite(rho)) {
+                    local_invalid = 1;
+                    return;
+                }
+
+                double u = rho_u / rho;
+                double v = rho_v / rho;
+                double kinetic = 0.5 * (u * u + v * v);
+                double p = (gamma_ - 1.0) * (E - rho * kinetic);
+
+                if (p <= 0.0 || !std::isfinite(p)) {
+                    local_invalid = 1;
+                    return;
+                }
+
+                double c = std::sqrt(std::max(gamma_ * p / rho, 0.0));
+                double vel_mag = std::sqrt(u * u + v * v);
+                double wave_speed = vel_mag + c;
+
+                max_wave_speed = std::max(max_wave_speed, wave_speed);
             }
 
-            double c = std::sqrt(std::max(gamma_ * p / rho, 0.0));
-            double vel_mag = std::sqrt(u * u + v * v);
-            double wave_speed = vel_mag + c;
+            double cfl_elem = dt * max_wave_speed / h_elem;
+            local_max = std::max(local_max, cfl_elem);
+        },
+        Kokkos::Max<double, Kokkos::HostSpace>(max_cfl),
+        Kokkos::Sum<int, Kokkos::HostSpace>(invalid_found));
 
-            max_wave_speed = std::max(max_wave_speed, wave_speed);
-        }
-
-        double cfl_elem = dt * max_wave_speed / h_elem;
-        max_cfl = std::max(max_cfl, cfl_elem);
+    if (invalid_found > 0) {
+        return std::numeric_limits<double>::infinity();
     }
-
     return max_cfl;
 }
 
 std::pair<double, double>
 CompressibleDGSolverBase::compute_density_range(const StateVector& u_coeffs) const {
     auto dg_space = mesh_->get_dg_space();
-    const Eigen::MatrixXd& phi = dg_space->get_volume_basis_values();
-    int n_quad = phi.rows();
+    const DView2& phi = dg_space->get_volume_basis_values();
+    int n_quad = static_cast<int>(phi.extent(0));
 
     double rho_min = std::numeric_limits<double>::infinity();
     double rho_max = std::numeric_limits<double>::lowest();
 
-    for (const auto& elem_coeffs : u_coeffs) {
-        Eigen::MatrixXd U_quad = phi * elem_coeffs;
-        for (int q = 0; q < n_quad; ++q) {
-            double rho = U_quad(q, 0);
-            if (!std::isfinite(rho)) {
-                continue;
+    Kokkos::parallel_reduce(
+        "compute_density_range", u_coeffs.size(),
+        [&](const size_t idx, double& local_min, double& local_max) {
+            const auto& elem_coeffs = u_coeffs[idx];
+            DView2 U_quad("U_quad", n_quad, static_cast<int>(elem_coeffs.extent(1)));
+            gemm('N', 'N', 1.0, phi, elem_coeffs, 0.0, U_quad);
+            for (int q = 0; q < n_quad; ++q) {
+                double rho = U_quad(q, 0);
+                if (!std::isfinite(rho)) {
+                    continue;
+                }
+                local_min = std::min(local_min, rho);
+                local_max = std::max(local_max, rho);
             }
-            rho_min = std::min(rho_min, rho);
-            rho_max = std::max(rho_max, rho);
-        }
-    }
+        },
+        Kokkos::Min<double, Kokkos::HostSpace>(rho_min),
+        Kokkos::Max<double, Kokkos::HostSpace>(rho_max));
 
     if (!std::isfinite(rho_min) || !std::isfinite(rho_max)) {
         double nan_value = std::numeric_limits<double>::quiet_NaN();
@@ -198,9 +223,9 @@ CompressibleDGSolverBase::compute_density_range(const StateVector& u_coeffs) con
     return {rho_min, rho_max};
 }
 
-std::vector<Eigen::MatrixXd> CompressibleDGSolverBase::run_time_integration(
-    std::function<Eigen::Vector4d(const Eigen::Vector2d&)> initial_condition, double T_final,
-    double dt, int save_every) {
+std::vector<DView2>
+CompressibleDGSolverBase::run_time_integration(std::function<Vec4(const Vec2&)> initial_condition,
+                                               double T_final, double dt, int save_every) {
     std::ostringstream intro;
     intro << "Starting " << solver_label_ << " integration (T_final = " << T_final
           << ", dt = " << dt << ", save_every = " << save_every << ")";
@@ -289,7 +314,16 @@ std::vector<Eigen::MatrixXd> CompressibleDGSolverBase::run_time_integration(
 
         bool has_nan = false;
         for (const auto& elem_coeffs : u_current) {
-            if (elem_coeffs.hasNaN()) {
+            bool elem_has_nan = false;
+            for (int i = 0; i < static_cast<int>(elem_coeffs.extent(0)) && !elem_has_nan; ++i) {
+                for (int v = 0; v < static_cast<int>(elem_coeffs.extent(1)); ++v) {
+                    if (std::isnan(elem_coeffs(i, v))) {
+                        elem_has_nan = true;
+                        break;
+                    }
+                }
+            }
+            if (elem_has_nan) {
                 has_nan = true;
                 break;
             }
@@ -337,9 +371,9 @@ std::vector<Eigen::MatrixXd> CompressibleDGSolverBase::run_time_integration(
     return flattened;
 }
 
-std::vector<Eigen::MatrixXd>
+std::vector<DView2>
 CompressibleDGSolverBase::flatten_frames(const std::vector<StateVector>& frames) const {
-    std::vector<Eigen::MatrixXd> flat_frames;
+    std::vector<DView2> flat_frames;
     flat_frames.reserve(frames.size());
 
     for (const auto& frame : frames) {
@@ -349,10 +383,10 @@ CompressibleDGSolverBase::flatten_frames(const std::vector<StateVector>& frames)
             continue;
         }
 
-        int n_basis = frame[0].rows();
-        int n_vars = frame[0].cols();
+        int n_basis = static_cast<int>(frame[0].extent(0));
+        int n_vars = static_cast<int>(frame[0].extent(1));
 
-        Eigen::MatrixXd flat_frame(n_elem, n_basis * n_vars);
+        DView2 flat_frame("flat_frame", n_elem, n_basis * n_vars);
         for (int e = 0; e < n_elem; ++e) {
             for (int i = 0; i < n_basis; ++i) {
                 for (int v = 0; v < n_vars; ++v) {

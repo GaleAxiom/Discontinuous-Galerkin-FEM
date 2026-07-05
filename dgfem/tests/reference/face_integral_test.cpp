@@ -3,9 +3,9 @@
  * @brief Analytical verification of face integral computations
  */
 
-#include <Eigen/Dense>
 #include <cmath>
 #include <dgfem/core/space.hpp>
+#include <dgfem/kokkos_math.hpp>
 #include <dgfem/quadrature/factory.hpp>
 #include <dgfem/reference/elements.hpp>
 
@@ -16,7 +16,7 @@ using namespace dgfem;
 class FaceIntegralTest : public ::testing::Test {
 protected:
     double integrate_face(const ReferenceElement& ref_elem, int face_id,
-                          std::function<double(const Eigen::Vector2d&)> func,
+                          std::function<double(const Vec2&)> func,
                           const std::string& element_type = "triangle") {
         // Create a DGSpace to get quadrature rules and mapping
         DGSpace dg_space(element_type, 2);  // order 2 is sufficient for test
@@ -25,14 +25,14 @@ protected:
         double integral = 0.0;
         for (int q = 0; q < face_quad->size(); ++q) {
             double s = face_quad->points(q, 0);  // 1D quadrature point in [-1,1]
-            Eigen::Vector2d xi_face = dg_space.map_face_quad_point(face_id, s);
+            Vec2 xi_face = dg_space.map_face_quad_point(face_id, s);
             double value = func(xi_face);
 
             // Get face length scaling from reference element vertices
             auto [v1_idx, v2_idx] = ref_elem.edge_vertices(face_id);
-            Eigen::Vector2d v1 = ref_elem.get_vertices().row(v1_idx);
-            Eigen::Vector2d v2 = ref_elem.get_vertices().row(v2_idx);
-            double edge_length = (v2 - v1).norm();
+            Vec2 v1 = row2(ref_elem.get_vertices(), v1_idx);
+            Vec2 v2 = row2(ref_elem.get_vertices(), v2_idx);
+            double edge_length = norm(v2 - v1);
 
             integral += value * face_quad->weights[q] * edge_length / 2.0;
         }
@@ -45,7 +45,7 @@ TEST_F(FaceIntegralTest, TriangleFaceIntegralConstant) {
     // Integrate constant function over each face of reference triangle
     ReferenceTriangle tri;
 
-    auto constant = [](const Eigen::Vector2d& x) { return 1.0; };
+    auto constant = [](const Vec2& x) { return 1.0; };
 
     // Face 0: from (0,0) to (1,0), length = 1
     double int0 = integrate_face(tri, 0, constant);
@@ -66,7 +66,7 @@ TEST_F(FaceIntegralTest, TriangleFaceIntegralLinear) {
 
     // Face 0: y=0, x from 0 to 1
     // Integrate x: ∫₀¹ x dx = 1/2
-    auto func_x = [](const Eigen::Vector2d& x) { return x[0]; };
+    auto func_x = [](const Vec2& x) { return x[0]; };
     double int0 = integrate_face(tri, 0, func_x);
     EXPECT_NEAR(int0, 0.5, 1e-12);
 
@@ -89,14 +89,14 @@ TEST_F(FaceIntegralTest, TriangleFaceIntegralQuadratic) {
 
     // Face 0: y=0, x from 0 to 1
     // Integrate x²: ∫₀¹ x² dx = 1/3
-    auto func_x2 = [](const Eigen::Vector2d& x) { return x[0] * x[0]; };
+    auto func_x2 = [](const Vec2& x) { return x[0] * x[0]; };
     double int0 = integrate_face(tri, 0, func_x2);
     EXPECT_NEAR(int0, 1.0 / 3.0, 1e-12);
 
     // Integrate xy over face 1
     // Parameterized as (1-t, t), so xy = (1-t)t
     // ∫₀¹ (1-t)t √2 dt = √2 ∫₀¹ (t - t²) dt = √2 * [t²/2 - t³/3]₀¹ = √2/6
-    auto func_xy = [](const Eigen::Vector2d& x) { return x[0] * x[1]; };
+    auto func_xy = [](const Vec2& x) { return x[0] * x[1]; };
     double int1 = integrate_face(tri, 1, func_xy);
     EXPECT_NEAR(int1, std::sqrt(2.0) / 6.0, 1e-11);
 }
@@ -105,7 +105,7 @@ TEST_F(FaceIntegralTest, QuadFaceIntegralConstant) {
     // Integrate constant over quad reference element [-1,1]²
     ReferenceQuad quad;
 
-    auto constant = [](const Eigen::Vector2d& x) { return 1.0; };
+    auto constant = [](const Vec2& x) { return 1.0; };
 
     // All faces have length 2
     for (int face = 0; face < 4; ++face) {
@@ -120,18 +120,18 @@ TEST_F(FaceIntegralTest, QuadFaceIntegralLinear) {
 
     // Face 0: bottom, y=-1, x from -1 to 1
     // ∫₋₁¹ x dx = 0 (odd function)
-    auto func_x = [](const Eigen::Vector2d& x) { return x[0]; };
+    auto func_x = [](const Vec2& x) { return x[0]; };
     double int0 = integrate_face(quad, 0, func_x, "quad");
     EXPECT_NEAR(int0, 0.0, 1e-12) << "Integral of odd function over symmetric interval";
 
     // Face 1: right, x=1, y from -1 to 1
     // ∫₋₁¹ y dy = 0
-    auto func_y = [](const Eigen::Vector2d& x) { return x[1]; };
+    auto func_y = [](const Vec2& x) { return x[1]; };
     double int1 = integrate_face(quad, 1, func_y, "quad");
     EXPECT_NEAR(int1, 0.0, 1e-12);
 
     // Integrate constant on face 0: should be 2
-    auto const_one = [](const Eigen::Vector2d& x) { return 1.0; };
+    auto const_one = [](const Vec2& x) { return 1.0; };
     int0 = integrate_face(quad, 0, const_one, "quad");
     EXPECT_NEAR(int0, 2.0, 1e-12);
 }
@@ -140,7 +140,7 @@ TEST_F(FaceIntegralTest, QuadFaceIntegralQuadratic) {
     // Integrate x² over faces
     ReferenceQuad quad;
 
-    auto func_x2 = [](const Eigen::Vector2d& x) { return x[0] * x[0]; };
+    auto func_x2 = [](const Vec2& x) { return x[0] * x[0]; };
 
     // Face 0: bottom, y=-1, x from -1 to 1
     // ∫₋₁¹ x² dx = 2/3
@@ -168,8 +168,8 @@ TEST_F(FaceIntegralTest, BasisFunctionFaceIntegral) {
 
     // Face 0: integrate each basis function
     for (int i = 0; i < n_basis; ++i) {
-        auto basis_func = [&basis, i](const Eigen::Vector2d& x) {
-            Eigen::VectorXd all_basis = basis->evaluate(x);
+        auto basis_func = [&basis, i](const Vec2& x) {
+            DView1 all_basis = basis->evaluate(x);
             return all_basis[i];
         };
 
@@ -196,7 +196,7 @@ TEST_F(FaceIntegralTest, NormalDerivativeIntegral) {
     // On face 1: normal is (1/√2, 1/√2)
     // du/dn = ∇u · n = (1, 0) · (1/√2, 1/√2) = 1/√2
 
-    auto func_constant = [](const Eigen::Vector2d& x) { return 1.0 / std::sqrt(2.0); };
+    auto func_constant = [](const Vec2& x) { return 1.0 / std::sqrt(2.0); };
 
     // Integrate over face 1 (length √2)
     double integral = integrate_face(tri, 1, func_constant);
@@ -211,7 +211,7 @@ TEST_F(FaceIntegralTest, PhysicalFaceIntegral) {
     // Physical edge length = 2 * reference edge length
     double scale = 2.0;
 
-    auto constant = [](const Eigen::Vector2d& x) { return 1.0; };
+    auto constant = [](const Vec2& x) { return 1.0; };
 
     // Reference integral over face 0
     double ref_integral = integrate_face(tri, 0, constant);
@@ -232,7 +232,7 @@ TEST_F(FaceIntegralTest, HighOrderQuadratureAccuracy) {
     // Use a polynomial that can be integrated exactly with available quadrature
     // For 3 Gauss points: exact up to degree 5
     // Polynomial of degree 4: x²y²
-    auto poly4 = [](const Eigen::Vector2d& x) {
+    auto poly4 = [](const Vec2& x) {
         double x2 = x[0] * x[0];
         double y2 = x[1] * x[1];
         return x2 * y2;
@@ -243,7 +243,7 @@ TEST_F(FaceIntegralTest, HighOrderQuadratureAccuracy) {
     double edge_length_0 = 1.0;  // Face 0 goes from (0,0) to (1,0)
     for (int q = 0; q < face_quad->size(); ++q) {
         double s = face_quad->points(q, 0);
-        Eigen::Vector2d xi_face = dg_space.map_face_quad_point(0, s);
+        Vec2 xi_face = dg_space.map_face_quad_point(0, s);
         double value = poly4(xi_face);
         integral += value * face_quad->weights[q] * edge_length_0 / 2.0;
     }
@@ -256,7 +256,7 @@ TEST_F(FaceIntegralTest, HighOrderQuadratureAccuracy) {
     double edge_length_1 = std::sqrt(2.0);  // Face 1 goes from (1,0) to (0,1)
     for (int q = 0; q < face_quad->size(); ++q) {
         double s = face_quad->points(q, 0);
-        Eigen::Vector2d xi_face = dg_space.map_face_quad_point(1, s);
+        Vec2 xi_face = dg_space.map_face_quad_point(1, s);
         double value = poly4(xi_face);
         integral += value * face_quad->weights[q] * edge_length_1 / 2.0;
     }
@@ -272,7 +272,7 @@ TEST_F(FaceIntegralTest, FaceOrientationConsistency) {
     ReferenceTriangle tri;
 
     // The sum of outward normal components should be consistent
-    auto constant = [](const Eigen::Vector2d& x) { return 1.0; };
+    auto constant = [](const Vec2& x) { return 1.0; };
 
     double total = 0.0;
     for (int face = 0; face < 3; ++face) {
@@ -292,7 +292,7 @@ TEST_F(FaceIntegralTest, JacobianCorrectness) {
     // For reference quad, all faces should have jacobian = 1
     // (in reference space, edge length is 2, but jacobian accounts for parameterization)
 
-    auto constant = [](const Eigen::Vector2d& x) { return 1.0; };
+    auto constant = [](const Vec2& x) { return 1.0; };
 
     // Each face should integrate to its length
     for (int face = 0; face < 4; ++face) {

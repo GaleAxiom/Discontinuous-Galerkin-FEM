@@ -3,10 +3,10 @@
  * @brief Tests for h-convergence rates of DG solver
  */
 
-#include <Eigen/Dense>
 #include <cmath>
 #include <dgfem/boundary/conditions.hpp>
 #include <dgfem/core/space.hpp>
+#include <dgfem/kokkos_math.hpp>
 #include <dgfem/solver/dg_solver.hpp>
 #include <dgfem/utils/mesh_creation.hpp>
 
@@ -40,18 +40,18 @@ TEST_F(ConvergenceRateTest, HConvergenceTrianglesOrder1) {
     // -Δu = 2π²sin(πx)sin(πy)
 
     const double pi = M_PI;
-    auto exact = [pi](const Eigen::Vector2d& x) -> double {
+    auto exact = [pi](const Vec2& x) -> double {
         return std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
-    auto exact_grad = [pi](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-        Eigen::Vector2d grad;
+    auto exact_grad = [pi](const Vec2& x) -> Vec2 {
+        Vec2 grad;
         grad[0] = pi * std::cos(pi * x[0]) * std::sin(pi * x[1]);
         grad[1] = pi * std::sin(pi * x[0]) * std::cos(pi * x[1]);
         return grad;
     };
 
-    auto source = [pi](const Eigen::Vector2d& x) -> double {
+    auto source = [pi](const Vec2& x) -> double {
         return 2.0 * pi * pi * std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
@@ -76,7 +76,7 @@ TEST_F(ConvergenceRateTest, HConvergenceTrianglesOrder1) {
         mesh->set_boundary_condition("Right", bc_zero);
 
         LaplaceDGSolver solver(mesh, penalty);
-        Eigen::VectorXd solution = solver.solve(source);
+        DView1 solution = solver.solve(source);
 
         auto errors = solver.compute_error(exact, exact_grad);
         l2_errors.push_back(errors["L2"]);
@@ -110,18 +110,18 @@ TEST_F(ConvergenceRateTest, HConvergenceTrianglesOrder1) {
 TEST_F(ConvergenceRateTest, HConvergenceTrianglesOrder2) {
     // Same manufactured solution
     const double pi = M_PI;
-    auto exact = [pi](const Eigen::Vector2d& x) -> double {
+    auto exact = [pi](const Vec2& x) -> double {
         return std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
-    auto exact_grad = [pi](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-        Eigen::Vector2d grad;
+    auto exact_grad = [pi](const Vec2& x) -> Vec2 {
+        Vec2 grad;
         grad[0] = pi * std::cos(pi * x[0]) * std::sin(pi * x[1]);
         grad[1] = pi * std::sin(pi * x[0]) * std::cos(pi * x[1]);
         return grad;
     };
 
-    auto source = [pi](const Eigen::Vector2d& x) -> double {
+    auto source = [pi](const Vec2& x) -> double {
         return 2.0 * pi * pi * std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
@@ -144,7 +144,7 @@ TEST_F(ConvergenceRateTest, HConvergenceTrianglesOrder2) {
         mesh->set_boundary_condition("Right", bc_zero);
 
         LaplaceDGSolver solver(mesh, penalty);
-        Eigen::VectorXd solution = solver.solve(source);
+        DView1 solution = solver.solve(source);
 
         auto errors = solver.compute_error(exact, exact_grad);
         l2_errors.push_back(errors["L2"]);
@@ -175,18 +175,18 @@ TEST_F(ConvergenceRateTest, HConvergenceTrianglesOrder2) {
 TEST_F(ConvergenceRateTest, HConvergenceQuadsOrder2) {
     // Test quad elements
     const double pi = M_PI;
-    auto exact = [pi](const Eigen::Vector2d& x) -> double {
+    auto exact = [pi](const Vec2& x) -> double {
         return std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
-    auto exact_grad = [pi](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-        Eigen::Vector2d grad;
+    auto exact_grad = [pi](const Vec2& x) -> Vec2 {
+        Vec2 grad;
         grad[0] = pi * std::cos(pi * x[0]) * std::sin(pi * x[1]);
         grad[1] = pi * std::sin(pi * x[0]) * std::cos(pi * x[1]);
         return grad;
     };
 
-    auto source = [pi](const Eigen::Vector2d& x) -> double {
+    auto source = [pi](const Vec2& x) -> double {
         return 2.0 * pi * pi * std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
@@ -209,7 +209,7 @@ TEST_F(ConvergenceRateTest, HConvergenceQuadsOrder2) {
         mesh->set_boundary_condition("Right", bc_zero);
 
         LaplaceDGSolver solver(mesh, penalty);
-        Eigen::VectorXd solution = solver.solve(source);
+        DView1 solution = solver.solve(source);
 
         auto errors = solver.compute_error(exact, exact_grad);
         l2_errors.push_back(errors["L2"]);
@@ -254,19 +254,17 @@ TEST_F(ConvergenceRateTest, HConvergenceQuadsOrder2) {
 TEST_F(ConvergenceRateTest, PolynomialReproductionOrder2) {
     // Test that order 2 exactly reproduces a quadratic polynomial
     // u = x²y + xy²
-    auto exact = [](const Eigen::Vector2d& x) -> double {
-        return x[0] * x[0] * x[1] + x[0] * x[1] * x[1];
-    };
+    auto exact = [](const Vec2& x) -> double { return x[0] * x[0] * x[1] + x[0] * x[1] * x[1]; };
 
-    auto exact_grad = [](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-        Eigen::Vector2d grad;
+    auto exact_grad = [](const Vec2& x) -> Vec2 {
+        Vec2 grad;
         grad[0] = 2.0 * x[0] * x[1] + x[1] * x[1];
         grad[1] = x[0] * x[0] + 2.0 * x[0] * x[1];
         return grad;
     };
 
     // -Δu = -(2y + 2x) = -2(x+y)
-    auto source = [](const Eigen::Vector2d& x) -> double { return -2.0 * (x[0] + x[1]); };
+    auto source = [](const Vec2& x) -> double { return -2.0 * (x[0] + x[1]); };
 
     // Test on a moderately fine mesh
     auto mesh = MeshCreator::create_rectangular_mesh(0.1, true, 0.0, 1.0, 0.0, 1.0);
@@ -274,10 +272,10 @@ TEST_F(ConvergenceRateTest, PolynomialReproductionOrder2) {
     mesh->initialize_dg_space(dg_space, 1);
 
     // Set Dirichlet BCs with exact solution values
-    auto bc_bottom = make_dirichlet_bc([exact](const Eigen::Vector2d& x) { return exact(x); });
-    auto bc_top = make_dirichlet_bc([exact](const Eigen::Vector2d& x) { return exact(x); });
-    auto bc_left = make_dirichlet_bc([exact](const Eigen::Vector2d& x) { return exact(x); });
-    auto bc_right = make_dirichlet_bc([exact](const Eigen::Vector2d& x) { return exact(x); });
+    auto bc_bottom = make_dirichlet_bc([exact](const Vec2& x) { return exact(x); });
+    auto bc_top = make_dirichlet_bc([exact](const Vec2& x) { return exact(x); });
+    auto bc_left = make_dirichlet_bc([exact](const Vec2& x) { return exact(x); });
+    auto bc_right = make_dirichlet_bc([exact](const Vec2& x) { return exact(x); });
 
     mesh->set_boundary_condition("Bottom", bc_bottom);
     mesh->set_boundary_condition("Top", bc_top);
@@ -285,7 +283,7 @@ TEST_F(ConvergenceRateTest, PolynomialReproductionOrder2) {
     mesh->set_boundary_condition("Right", bc_right);
 
     LaplaceDGSolver solver(mesh, 10.0);
-    Eigen::VectorXd solution = solver.solve(source);
+    DView1 solution = solver.solve(source);
 
     auto errors = solver.compute_error(exact, exact_grad);
 

@@ -5,7 +5,8 @@
 
 #pragma once
 
-#include <Eigen/Dense>
+#include "dgfem/kokkos_math.hpp"
+
 #include <optional>
 
 #include <map>
@@ -65,9 +66,8 @@ public:
      */
     [[nodiscard]] static std::shared_ptr<DGMesh>
     create_cylinder_channel_mesh(double length = 2.2, double height = 0.41, double radius = 0.05,
-                                 const Eigen::Vector2d& center = Eigen::Vector2d(0.2, 0.2),
-                                 double dx_channel = 0.08, double dx_cylinder = 0.02,
-                                 bool use_triangles = true);
+                                 const Vec2& center = Vec2{0.2, 0.2}, double dx_channel = 0.08,
+                                 double dx_cylinder = 0.02, bool use_triangles = true);
 
     /**
      * @brief Create DGMesh from current GMSH model
@@ -89,8 +89,7 @@ private:
     /**
      * @brief Extract mesh data from GMSH
      */
-    static void extract_mesh_data(Eigen::MatrixXd& vertices, Eigen::MatrixXi& elements,
-                                  Eigen::VectorXi& element_tags,
+    static void extract_mesh_data(DView2& vertices, IView2& elements, IView1& element_tags,
                                   std::map<std::string, int>& boundary_tags,
                                   std::map<int, std::vector<std::pair<int, int>>>& boundary_edges);
 
@@ -115,8 +114,8 @@ private:
  * @param max_iter Maximum iterations
  * @return Reference coordinates
  */
-[[nodiscard]] std::optional<Eigen::Vector2d>
-find_reference_coords(const Eigen::Vector2d& x_phys, const Eigen::MatrixXd& vertices,
-                      std::string_view element_type, double tol = 1e-10, int max_iter = 20);
+[[nodiscard]] std::optional<Vec2> find_reference_coords(const Vec2& x_phys, const DView2& vertices,
+                                                        std::string_view element_type,
+                                                        double tol = 1e-10, int max_iter = 20);
 
 }  // namespace dgfem

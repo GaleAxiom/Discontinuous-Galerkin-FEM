@@ -1,8 +1,8 @@
-#include <Eigen/Dense>
 #include <cmath>
 #include <dgfem/boundary/conditions.hpp>
 #include <dgfem/core/mesh.hpp>
 #include <dgfem/core/space.hpp>
+#include <dgfem/kokkos_math.hpp>
 #include <dgfem/solver/dg_solver.hpp>
 #include <dgfem/utils/mesh_creation.hpp>
 
@@ -65,8 +65,8 @@ TEST_F(LaplaceDGSolverTest, SolveWithSource) {
 
     auto solver = std::make_unique<LaplaceDGSolver>(mesh, 10.0);
 
-    auto source_func = [](const Eigen::Vector2d& x) -> double {
-        return std::sin(M_PI * x(0)) * std::sin(M_PI * x(1));
+    auto source_func = [](const Vec2& x) -> double {
+        return std::sin(M_PI * x[0]) * std::sin(M_PI * x[1]);
     };
 
     auto solution = solver->solve(source_func);
@@ -86,13 +86,13 @@ TEST_F(LaplaceDGSolverTest, ComputeError) {
     auto solver = std::make_unique<LaplaceDGSolver>(mesh, 10.0);
 
     // Test solution u(x,y) = x(1-x)y(1-y)
-    auto exact_solution = [](const Eigen::Vector2d& x) -> double {
-        return x(0) * (1.0 - x(0)) * x(1) * (1.0 - x(1));
+    auto exact_solution = [](const Vec2& x) -> double {
+        return x[0] * (1.0 - x[0]) * x[1] * (1.0 - x[1]);
     };
 
-    auto exact_gradient = [](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-        return Eigen::Vector2d((1.0 - 2.0 * x(0)) * x(1) * (1.0 - x(1)),
-                               x(0) * (1.0 - x(0)) * (1.0 - 2.0 * x(1)));
+    auto exact_gradient = [](const Vec2& x) -> Vec2 {
+        return Vec2{(1.0 - 2.0 * x[0]) * x[1] * (1.0 - x[1]),
+                    x[0] * (1.0 - x[0]) * (1.0 - 2.0 * x[1])};
     };
 
     solver->solve(nullptr);  // Solve homogeneous problem first
@@ -138,18 +138,18 @@ TEST_F(LaplaceDGSolverTest, FullSolver) {
         }
     }
     // Define source function f(x,y) = 2*(y(1-y) + x(1-x))
-    auto source_function = [](const Eigen::Vector2d& x) -> double {
+    auto source_function = [](const Vec2& x) -> double {
         return 2.0 * (x[1] * (1 - x[1]) + x[0] * (1 - x[0]));
     };
 
     // Define exact solution for error computation
-    auto exact_solution = [](const Eigen::Vector2d& x) -> double {
+    auto exact_solution = [](const Vec2& x) -> double {
         return x[0] * (1 - x[0]) * x[1] * (1 - x[1]);
     };
 
     // Define exact gradient
-    auto exact_gradient = [](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-        Eigen::Vector2d grad;
+    auto exact_gradient = [](const Vec2& x) -> Vec2 {
+        Vec2 grad;
         grad[0] = (1 - 2 * x[0]) * x[1] * (1 - x[1]);
         grad[1] = x[0] * (1 - x[0]) * (1 - 2 * x[1]);
         return grad;
@@ -183,27 +183,45 @@ TEST_F(LaplaceDGSolverTest, SystemMatrixTest) {
     solver->solve(nullptr);
 
     auto system_matrix_sparse = solver->get_system_matrix();
-    Eigen::MatrixXd system_matrix_dense = tpetra_to_dense(*system_matrix_sparse);
+    DView2 system_matrix_dense = tpetra_to_dense(*system_matrix_sparse);
 
-    Eigen::MatrixXd expected_matrix(12, 12);
-    expected_matrix << 120., 41., 39.5, -40., -19.5, -20., -40., -19.5, -0.5, 0., 0., 0., 41.,
-        26.66666667, 7.16666667, -19.5, -12.83333333, -6.41666667, -19.5, -12.83333333, -0.25, 0.,
-        0., 0., 39.5, 7.16666667, 26.16666667, -0.5, -0.25, -0.25, -20., -6.41666667, -0.25, 0., 0.,
-        0., -40., -19.5, -0.5, 120., 41., 39.5, 0., 0., 0., -40., -19.5, -20., -19.5, -12.83333333,
-        -0.25, 41., 26.66666667, 7.16666667, 0., 0., 0., -19.5, -12.83333333, -6.41666667, -20.,
-        -6.41666667, -0.25, 39.5, 7.16666667, 26.16666667, 0., 0., 0., -0.5, -0.25, -0.25, -40.,
-        -19.5, -20., 0., 0., 0., 120., 41., 39.5, -40., -19.5, -0.5, -19.5, -12.83333333,
-        -6.41666667, 0., 0., 0., 41., 26.66666667, 7.16666667, -19.5, -12.83333333, -0.25, -0.5,
-        -0.25, -0.25, 0., 0., 0., 39.5, 7.16666667, 26.16666667, -20., -6.41666667, -0.25, 0., 0.,
-        0., -40., -19.5, -0.5, -40., -19.5, -20., 120., 41., 39.5, 0., 0., 0., -19.5, -12.83333333,
-        -0.25, -19.5, -12.83333333, -6.41666667, 41., 26.66666667, 7.16666667, 0., 0., 0., -20.,
-        -6.41666667, -0.25, -0.5, -0.25, -0.25, 39.5, 7.16666667, 26.16666667;
+    double expected_flat[144] = {
+        120.,  41.,          39.5,        -40.,  -19.5,        -20.,
+        -40.,  -19.5,        -0.5,        0.,    0.,           0.,
+        41.,   26.66666667,  7.16666667,  -19.5, -12.83333333, -6.41666667,
+        -19.5, -12.83333333, -0.25,       0.,    0.,           0.,
+        39.5,  7.16666667,   26.16666667, -0.5,  -0.25,        -0.25,
+        -20.,  -6.41666667,  -0.25,       0.,    0.,           0.,
+        -40.,  -19.5,        -0.5,        120.,  41.,          39.5,
+        0.,    0.,           0.,          -40.,  -19.5,        -20.,
+        -19.5, -12.83333333, -0.25,       41.,   26.66666667,  7.16666667,
+        0.,    0.,           0.,          -19.5, -12.83333333, -6.41666667,
+        -20.,  -6.41666667,  -0.25,       39.5,  7.16666667,   26.16666667,
+        0.,    0.,           0.,          -0.5,  -0.25,        -0.25,
+        -40.,  -19.5,        -20.,        0.,    0.,           0.,
+        120.,  41.,          39.5,        -40.,  -19.5,        -0.5,
+        -19.5, -12.83333333, -6.41666667, 0.,    0.,           0.,
+        41.,   26.66666667,  7.16666667,  -19.5, -12.83333333, -0.25,
+        -0.5,  -0.25,        -0.25,       0.,    0.,           0.,
+        39.5,  7.16666667,   26.16666667, -20.,  -6.41666667,  -0.25,
+        0.,    0.,           0.,          -40.,  -19.5,        -0.5,
+        -40.,  -19.5,        -20.,        120.,  41.,          39.5,
+        0.,    0.,           0.,          -19.5, -12.83333333, -0.25,
+        -19.5, -12.83333333, -6.41666667, 41.,   26.66666667,  7.16666667,
+        0.,    0.,           0.,          -20.,  -6.41666667,  -0.25,
+        -0.5,  -0.25,        -0.25,       39.5,  7.16666667,   26.16666667};
+    DView2 expected_matrix("expected_matrix", 12, 12);
+    for (int i = 0; i < 12; ++i) {
+        for (int j = 0; j < 12; ++j) {
+            expected_matrix(i, j) = expected_flat[i * 12 + j];
+        }
+    }
 
-    ASSERT_EQ(system_matrix_dense.rows(), expected_matrix.rows());
-    ASSERT_EQ(system_matrix_dense.cols(), expected_matrix.cols());
+    ASSERT_EQ(system_matrix_dense.extent(0), expected_matrix.extent(0));
+    ASSERT_EQ(system_matrix_dense.extent(1), expected_matrix.extent(1));
 
-    for (int i = 0; i < expected_matrix.rows(); ++i) {
-        for (int j = 0; j < expected_matrix.cols(); ++j) {
+    for (int i = 0; i < static_cast<int>(expected_matrix.extent(0)); ++i) {
+        for (int j = 0; j < static_cast<int>(expected_matrix.extent(1)); ++j) {
             EXPECT_NEAR(system_matrix_dense(i, j), expected_matrix(i, j), 1e-5);
         }
     }
@@ -234,7 +252,7 @@ TEST_F(AdvectionDGSolverTest, WeakFormConstruction) {
     auto space = std::make_shared<DGSpace>("triangle", 1);
     mesh->initialize_dg_space(space);
 
-    Eigen::Vector2d velocity(1.0, 0.0);
+    Vec2 velocity{1.0, 0.0};
     auto weak_form = std::make_shared<AdvectionWeakFormulation>(velocity);
     EXPECT_NE(weak_form, nullptr);
 }
@@ -243,23 +261,23 @@ TEST_F(AdvectionDGSolverTest, MassMatrixAssembly) {
     auto space = std::make_shared<DGSpace>("triangle", 1);
     mesh->initialize_dg_space(space);
 
-    Eigen::Vector2d velocity(1.0, 0.0);
+    Vec2 velocity{1.0, 0.0};
 
     // Access assembler to test mass matrix
     auto weak_form = std::make_shared<AdvectionWeakFormulation>(velocity);
     auto assembler = std::make_shared<DGAssembler>(mesh, weak_form);
 
-    Eigen::MatrixXd M = tpetra_to_dense(*assembler->assemble_mass_matrix());
+    DView2 M = tpetra_to_dense(*assembler->assemble_mass_matrix());
 
     int n_dofs = mesh->get_n_elements() * space->get_basis()->get_n_basis();
-    EXPECT_EQ(M.rows(), n_dofs);
-    EXPECT_EQ(M.cols(), n_dofs);
+    EXPECT_EQ(M.extent(0), n_dofs);
+    EXPECT_EQ(M.extent(1), n_dofs);
 
     // Mass matrix should be symmetric
-    EXPECT_NEAR((M - M.transpose()).norm(), 0.0, 1e-10);
+    EXPECT_NEAR(asymmetry_norm(M), 0.0, 1e-10);
 
     // Mass matrix should be positive definite (diagonal dominant)
-    for (int i = 0; i < M.rows(); ++i) {
+    for (int i = 0; i < static_cast<int>(M.extent(0)); ++i) {
         EXPECT_GT(M(i, i), 0.0);
     }
 }
@@ -268,7 +286,7 @@ TEST_F(AdvectionDGSolverTest, ElementIntegralComputation) {
     auto space = std::make_shared<DGSpace>("triangle", 1);
     mesh->initialize_dg_space(space);
 
-    Eigen::Vector2d velocity(1.0, 0.5);
+    Vec2 velocity{1.0, 0.5};
     auto weak_form = std::make_shared<AdvectionWeakFormulation>(velocity);
 
     // Test element 0
@@ -277,17 +295,17 @@ TEST_F(AdvectionDGSolverTest, ElementIntegralComputation) {
     const auto& elem_data = mesh->get_element_data(elem_id);
 
     // Test mass integral
-    Eigen::MatrixXd M_elem = weak_form->compute_mass_integral(elem_data, space);
-    EXPECT_EQ(M_elem.rows(), n_basis);
-    EXPECT_EQ(M_elem.cols(), n_basis);
+    DView2 M_elem = weak_form->compute_mass_integral(elem_data, space);
+    EXPECT_EQ(M_elem.extent(0), n_basis);
+    EXPECT_EQ(M_elem.extent(1), n_basis);
 
     // Mass matrix should be symmetric
-    EXPECT_NEAR((M_elem - M_elem.transpose()).norm(), 0.0, 1e-12);
+    EXPECT_NEAR(asymmetry_norm(M_elem), 0.0, 1e-12);
 
     // Test stiffness integral
-    Eigen::MatrixXd L_elem = weak_form->compute_volume_integral(elem_data, space);
-    EXPECT_EQ(L_elem.rows(), n_basis);
-    EXPECT_EQ(L_elem.cols(), n_basis);
+    DView2 L_elem = weak_form->compute_volume_integral(elem_data, space);
+    EXPECT_EQ(L_elem.extent(0), n_basis);
+    EXPECT_EQ(L_elem.extent(1), n_basis);
 }
 
 TEST_F(AdvectionDGSolverTest, WeakFormVelocityFields) {
@@ -295,19 +313,19 @@ TEST_F(AdvectionDGSolverTest, WeakFormVelocityFields) {
     mesh->initialize_dg_space(space);
 
     // Test different velocity fields
-    Eigen::Vector2d velocity_zero(0.0, 0.0);
+    Vec2 velocity_zero{0.0, 0.0};
     auto wf_zero = std::make_shared<AdvectionWeakFormulation>(velocity_zero);
     EXPECT_NE(wf_zero, nullptr);
 
-    Eigen::Vector2d velocity_x(1.0, 0.0);
+    Vec2 velocity_x{1.0, 0.0};
     auto wf_x = std::make_shared<AdvectionWeakFormulation>(velocity_x);
     EXPECT_NE(wf_x, nullptr);
 
-    Eigen::Vector2d velocity_y(0.0, 1.0);
+    Vec2 velocity_y{0.0, 1.0};
     auto wf_y = std::make_shared<AdvectionWeakFormulation>(velocity_y);
     EXPECT_NE(wf_y, nullptr);
 
-    Eigen::Vector2d velocity_diag(1.0, 1.0);
+    Vec2 velocity_diag{1.0, 1.0};
     auto wf_diag = std::make_shared<AdvectionWeakFormulation>(velocity_diag);
     EXPECT_NE(wf_diag, nullptr);
 }

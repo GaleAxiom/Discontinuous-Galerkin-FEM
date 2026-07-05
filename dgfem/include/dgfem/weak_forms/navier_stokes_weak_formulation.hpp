@@ -7,9 +7,12 @@
 
 #include "dgfem/weak_forms/euler_weak_formulation.hpp"
 
-#include <Eigen/Dense>
+#include <array>
 
 namespace dgfem {
+
+/// Gradient of the 4 conserved variables w.r.t. physical (x,y): GradU4[v] = (d U_v/dx, d U_v/dy)
+using GradU4 = std::array<Vec2, 4>;
 
 /**
  * @brief Navier-Stokes weak formulation with laminar viscous fluxes using SIPG-style penalties
@@ -23,21 +26,20 @@ public:
     [[nodiscard]] std::string get_type() const override { return "NavierStokes"; }
     [[nodiscard]] bool has_viscous_terms() const noexcept override { return true; }
 
-    [[nodiscard]] Eigen::MatrixXd
-    viscous_volume_residual(const Eigen::MatrixXd& u_coeffs_elem,
-                            const std::map<std::string, Eigen::MatrixXd>& elem_data,
-                            std::shared_ptr<DGSpace> dg_space) const override;
+    [[nodiscard]] DView2 viscous_volume_residual(const DView2& u_coeffs_elem,
+                                                 const std::map<std::string, DView2>& elem_data,
+                                                 std::shared_ptr<DGSpace> dg_space) const override;
 
-    [[nodiscard]] std::tuple<Eigen::MatrixXd, Eigen::MatrixXd> viscous_interior_face_residual(
-        const Eigen::MatrixXd& u_coeffs_L, const Eigen::MatrixXd& u_coeffs_R,
-        const std::map<std::string, Eigen::MatrixXd>& face_data_L,
-        const std::map<std::string, Eigen::MatrixXd>& face_data_R,
-        std::shared_ptr<DGSpace> dg_space,
-        const Eigen::VectorXi& permutation = Eigen::VectorXi()) const override;
+    [[nodiscard]] std::tuple<DView2, DView2>
+    viscous_interior_face_residual(const DView2& u_coeffs_L, const DView2& u_coeffs_R,
+                                   const std::map<std::string, DView2>& face_data_L,
+                                   const std::map<std::string, DView2>& face_data_R,
+                                   std::shared_ptr<DGSpace> dg_space,
+                                   const IView1& permutation = IView1()) const override;
 
-    [[nodiscard]] Eigen::MatrixXd
-    viscous_boundary_face_residual(const Eigen::MatrixXd& u_coeffs,
-                                   const std::map<std::string, Eigen::MatrixXd>& face_data,
+    [[nodiscard]] DView2
+    viscous_boundary_face_residual(const DView2& u_coeffs,
+                                   const std::map<std::string, DView2>& face_data,
                                    std::shared_ptr<BoundaryConditionEuler> bc,
                                    std::shared_ptr<DGSpace> dg_space) const override;
 
@@ -53,10 +55,10 @@ private:
         double v{};
         double p{};
         double temperature{};
-        Eigen::Vector2d grad_rho{Eigen::Vector2d::Zero()};
-        Eigen::Vector2d grad_u{Eigen::Vector2d::Zero()};
-        Eigen::Vector2d grad_v{Eigen::Vector2d::Zero()};
-        Eigen::Vector2d grad_T{Eigen::Vector2d::Zero()};
+        Vec2 grad_rho{0.0, 0.0};
+        Vec2 grad_u{0.0, 0.0};
+        Vec2 grad_v{0.0, 0.0};
+        Vec2 grad_T{0.0, 0.0};
         double divergence{};
         double tau_xx{};
         double tau_xy{};
@@ -65,13 +67,11 @@ private:
         double q_y{};
     };
 
-    [[nodiscard]] PrimitiveGradientData
-    compute_primitive_gradients(const Eigen::Vector4d& U,
-                                const Eigen::Matrix<double, 4, 2>& grad_U) const;
+    [[nodiscard]] PrimitiveGradientData compute_primitive_gradients(const Vec4& U,
+                                                                    const GradU4& grad_U) const;
 
-    [[nodiscard]] std::pair<Eigen::Vector4d, Eigen::Vector4d>
-    compute_viscous_fluxes(const Eigen::Vector4d& U,
-                           const Eigen::Matrix<double, 4, 2>& grad_U) const;
+    [[nodiscard]] std::pair<Vec4, Vec4> compute_viscous_fluxes(const Vec4& U,
+                                                               const GradU4& grad_U) const;
 
     double mu_;
     double prandtl_;

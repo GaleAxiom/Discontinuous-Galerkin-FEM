@@ -7,13 +7,14 @@
 #include "dgfem/boundary/conditions.hpp"
 #include "dgfem/core/mesh.hpp"
 #include "dgfem/core/space.hpp"
+#include "dgfem/kokkos_math.hpp"
 #include "dgfem/reference/elements.hpp"
 #include "dgfem/reference/mapping.hpp"
 #include "dgfem/solver/dg_solver.hpp"
 #include "dgfem/solver/weak_form.hpp"
 #include "dgfem/utils/mesh_creation.hpp"
 
-#include <Eigen/Dense>
+#include <Teuchos_LAPACK.hpp>
 #include <cmath>
 
 #include <functional>
@@ -21,6 +22,28 @@
 #include <gtest/gtest.h>
 
 using namespace dgfem;
+
+namespace {
+// Minimum eigenvalue of a symmetric matrix, via LAPACK SYEV (replaces
+// Eigen::SelfAdjointEigenSolver).
+double min_eigenvalue_symmetric(const DView2& K) {
+    int n = static_cast<int>(K.extent(0));
+    std::vector<double> A(n * n);
+    // LAPACK expects column-major storage; K is symmetric so row/col-major is equivalent.
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            A[i + j * n] = K(i, j);
+        }
+    }
+    std::vector<double> W(n);
+    int lwork = std::max(1, 3 * n);
+    std::vector<double> work(lwork);
+    int info = 0;
+    Teuchos::LAPACK<int, double> lapack;
+    lapack.SYEV('N', 'U', n, A.data(), n, W.data(), work.data(), lwork, &info);
+    return *std::min_element(W.begin(), W.end());
+}
+}  // namespace
 
 class QuadElementTest : public ::testing::Test {
 protected:
@@ -36,8 +59,8 @@ protected:
 TEST_F(QuadElementTest, ReferenceVertices) {
     const auto& vertices = ref_quad->get_vertices();
 
-    EXPECT_EQ(vertices.rows(), 4);
-    EXPECT_EQ(vertices.cols(), 2);
+    EXPECT_EQ(vertices.extent(0), 4);
+    EXPECT_EQ(vertices.extent(1), 2);
 
     // Check vertices are at corners of [-1,1]^2
     EXPECT_NEAR(vertices(0, 0), -1.0, 1e-10);
@@ -69,22 +92,25 @@ TEST_F(QuadElementTest, EdgeVertices) {
 }
 
 TEST_F(QuadElementTest, ContainsPoint) {
-    EXPECT_TRUE(ref_quad->contains_point(Eigen::Vector2d(0.0, 0.0)));
-    EXPECT_TRUE(ref_quad->contains_point(Eigen::Vector2d(1.0, 1.0)));
-    EXPECT_TRUE(ref_quad->contains_point(Eigen::Vector2d(-1.0, -1.0)));
-    EXPECT_TRUE(ref_quad->contains_point(Eigen::Vector2d(0.5, -0.5)));
+    EXPECT_TRUE(ref_quad->contains_point(Vec2{0.0, 0.0}));
+    EXPECT_TRUE(ref_quad->contains_point(Vec2{1.0, 1.0}));
+    EXPECT_TRUE(ref_quad->contains_point(Vec2{-1.0, -1.0}));
+    EXPECT_TRUE(ref_quad->contains_point(Vec2{0.5, -0.5}));
 
-    EXPECT_FALSE(ref_quad->contains_point(Eigen::Vector2d(1.1, 0.0)));
-    EXPECT_FALSE(ref_quad->contains_point(Eigen::Vector2d(0.0, -1.1)));
+    EXPECT_FALSE(ref_quad->contains_point(Vec2{1.1, 0.0}));
+    EXPECT_FALSE(ref_quad->contains_point(Vec2{0.0, -1.1}));
 }
 
 TEST_F(QuadElementTest, BilinearMapping) {
     // Create a simple unit square [0,1]x[0,1]
-    Eigen::MatrixXd vertices(4, 2);
-    vertices << 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0;
+    DView2 vertices("vertices", 4, 2);
+    set_row2(vertices, 0, Vec2{0.0, 0.0});
+    set_row2(vertices, 1, Vec2{1.0, 0.0});
+    set_row2(vertices, 2, Vec2{1.0, 1.0});
+    set_row2(vertices, 3, Vec2{0.0, 1.0});
 
     // Test mapping at center of reference element
-    Eigen::Vector2d xi(0.0, 0.0);
+    Vec2 xi{0.0, 0.0};
     auto data = mapping->compute_mapping(vertices, xi);
 
     // Physical point should be at (0.5, 0.5)
@@ -103,15 +129,17 @@ TEST_F(QuadElementTest, BilinearMapping) {
 
 TEST_F(QuadElementTest, MappingAtCorners) {
     // Create a unit square [0,1]x[0,1]
-    Eigen::MatrixXd vertices(4, 2);
-    vertices << 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0;
+    DView2 vertices("vertices", 4, 2);
+    set_row2(vertices, 0, Vec2{0.0, 0.0});
+    set_row2(vertices, 1, Vec2{1.0, 0.0});
+    set_row2(vertices, 2, Vec2{1.0, 1.0});
+    set_row2(vertices, 3, Vec2{0.0, 1.0});
 
     // Test all four corners
-    std::vector<std::pair<Eigen::Vector2d, Eigen::Vector2d>> corner_tests = {
-        {Eigen::Vector2d(-1.0, -1.0), Eigen::Vector2d(0.0, 0.0)},
-        {Eigen::Vector2d(1.0, -1.0), Eigen::Vector2d(1.0, 0.0)},
-        {Eigen::Vector2d(1.0, 1.0), Eigen::Vector2d(1.0, 1.0)},
-        {Eigen::Vector2d(-1.0, 1.0), Eigen::Vector2d(0.0, 1.0)}};
+    std::vector<std::pair<Vec2, Vec2>> corner_tests = {{Vec2{-1.0, -1.0}, Vec2{0.0, 0.0}},
+                                                       {Vec2{1.0, -1.0}, Vec2{1.0, 0.0}},
+                                                       {Vec2{1.0, 1.0}, Vec2{1.0, 1.0}},
+                                                       {Vec2{-1.0, 1.0}, Vec2{0.0, 1.0}}};
 
     for (const auto& [xi, expected] : corner_tests) {
         auto data = mapping->compute_mapping(vertices, xi);
@@ -137,8 +165,8 @@ TEST_F(QuadLegendreBasisTest, NumberOfBasisFunctions) {
 }
 
 TEST_F(QuadLegendreBasisTest, EvaluateAtCenter) {
-    Eigen::Vector2d xi(0.0, 0.0);
-    Eigen::VectorXd phi = basis_p2->evaluate(xi);
+    Vec2 xi{0.0, 0.0};
+    DView1 phi = basis_p2->evaluate(xi);
 
     EXPECT_EQ(phi.size(), 9);
 
@@ -156,11 +184,11 @@ TEST_F(QuadLegendreBasisTest, EvaluateAtCenter) {
 }
 
 TEST_F(QuadLegendreBasisTest, GradientAtCenter) {
-    Eigen::Vector2d xi(0.0, 0.0);
-    Eigen::MatrixXd grad = basis_p2->evaluate_gradient(xi);
+    Vec2 xi{0.0, 0.0};
+    DView2 grad = basis_p2->evaluate_gradient(xi);
 
-    EXPECT_EQ(grad.rows(), 9);
-    EXPECT_EQ(grad.cols(), 2);
+    EXPECT_EQ(grad.extent(0), 9);
+    EXPECT_EQ(grad.extent(1), 2);
 
     // P_0'(0) = 0, P_1'(0) = 1, P_2'(0) = 0
     // grad[idx] = (dP_i/dxi * P_j, P_i * dP_j/deta)
@@ -195,22 +223,17 @@ TEST_F(QuadDGSpaceTest, FaceQuadratureMapping) {
     const auto& face_quad = dg_space->get_face_quad();
 
     // For each face, check that quadrature points map to the correct edge
-    std::vector<std::pair<int, std::function<bool(const Eigen::Vector2d&)>>> face_checks = {
-        {0,
-         [](const Eigen::Vector2d& xi) {
-             return std::abs(xi[1] + 1.0) < 1e-10;
-         }},  // Bottom: y = -1
-        {1,
-         [](const Eigen::Vector2d& xi) { return std::abs(xi[0] - 1.0) < 1e-10; }},  // Right: x = 1
-        {2, [](const Eigen::Vector2d& xi) { return std::abs(xi[1] - 1.0) < 1e-10; }},  // Top: y = 1
-        {3,
-         [](const Eigen::Vector2d& xi) { return std::abs(xi[0] + 1.0) < 1e-10; }}  // Left: x = -1
+    std::vector<std::pair<int, std::function<bool(const Vec2&)>>> face_checks = {
+        {0, [](const Vec2& xi) { return std::abs(xi[1] + 1.0) < 1e-10; }},  // Bottom: y = -1
+        {1, [](const Vec2& xi) { return std::abs(xi[0] - 1.0) < 1e-10; }},  // Right: x = 1
+        {2, [](const Vec2& xi) { return std::abs(xi[1] - 1.0) < 1e-10; }},  // Top: y = 1
+        {3, [](const Vec2& xi) { return std::abs(xi[0] + 1.0) < 1e-10; }}   // Left: x = -1
     };
 
     for (const auto& [face_id, check_func] : face_checks) {
         for (int q = 0; q < face_quad->size(); ++q) {
             double s = face_quad->points(q, 0);
-            Eigen::Vector2d xi = dg_space->map_face_quad_point(face_id, s);
+            Vec2 xi = dg_space->map_face_quad_point(face_id, s);
             EXPECT_TRUE(check_func(xi)) << "Face " << face_id << ", quad point " << q
                                         << " mapped to (" << xi[0] << ", " << xi[1] << ")";
         }
@@ -225,20 +248,13 @@ TEST_F(QuadDGSpaceTest, FaceNormals) {
     mesh->initialize_dg_space(dg_space, 1);
 
     // Check face normals for first element
-    // Get the actual vertices to determine expected normals
-    const auto& elem_verts = mesh->get_elements().row(0);
-    Eigen::MatrixXd vertices(4, 2);
-    for (int i = 0; i < 4; ++i) {
-        vertices.row(i) = mesh->get_vertices().row(elem_verts(i));
-    }
-
     for (int face = 0; face < 4; ++face) {
         const auto& face_data = mesh->get_face_data(0, face);
-        Eigen::Vector2d normal = face_data.at("normal").head<2>();
-        double length = face_data.at("length")[0];
+        Vec2 normal = to_vec2(face_data.at("normal"));
+        double length = scalar_of(face_data.at("length"));
 
         // Normal should be unit length
-        EXPECT_NEAR(normal.norm(), 1.0, 1e-6) << "Face " << face;
+        EXPECT_NEAR(norm(normal), 1.0, 1e-6) << "Face " << face;
 
         // Face length should be 0.5 for this mesh
         EXPECT_NEAR(length, 0.5, 1e-2) << "Face " << face;
@@ -268,10 +284,10 @@ TEST_F(QuadVolumeIntegralTest, StiffnessMatrix) {
     const auto& elem_data = mesh->get_element_data(0);
 
     LaplaceWeakFormulation weak_form(10.0);
-    Eigen::MatrixXd K = weak_form.compute_volume_integral(elem_data, dg_space);
+    DView2 K = weak_form.compute_volume_integral(elem_data, dg_space);
 
-    EXPECT_EQ(K.rows(), 9);
-    EXPECT_EQ(K.cols(), 9);
+    EXPECT_EQ(K.extent(0), 9);
+    EXPECT_EQ(K.extent(1), 9);
 
     // K[0,0] should be 0 (constant function has zero gradient)
     EXPECT_NEAR(K(0, 0), 0.0, 1e-10);
@@ -295,10 +311,7 @@ TEST_F(QuadVolumeIntegralTest, StiffnessMatrix) {
     }
 
     // Matrix should be positive semi-definite (all eigenvalues >= 0)
-    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eigensolver(K);
-    for (int i = 0; i < 9; ++i) {
-        EXPECT_GE(eigensolver.eigenvalues()[i], -1e-10) << "Eigenvalue " << i << " is negative";
-    }
+    EXPECT_GE(min_eigenvalue_symmetric(K), -1e-10) << "Smallest eigenvalue is negative";
 }
 
 class QuadConvergenceTest : public ::testing::Test {
@@ -313,16 +326,14 @@ TEST_F(QuadConvergenceTest, PolynomialSolution) {
     // u = x(1-x)y(1-y)
     // -Δu = 2y(1-y) + 2x(1-x)
 
-    auto source = [](const Eigen::Vector2d& x) -> double {
+    auto source = [](const Vec2& x) -> double {
         return 2.0 * x[1] * (1.0 - x[1]) + 2.0 * x[0] * (1.0 - x[0]);
     };
 
-    auto exact = [](const Eigen::Vector2d& x) -> double {
-        return x[0] * (1.0 - x[0]) * x[1] * (1.0 - x[1]);
-    };
+    auto exact = [](const Vec2& x) -> double { return x[0] * (1.0 - x[0]) * x[1] * (1.0 - x[1]); };
 
-    auto exact_grad = [](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-        Eigen::Vector2d grad;
+    auto exact_grad = [](const Vec2& x) -> Vec2 {
+        Vec2 grad;
         grad[0] = (1.0 - 2.0 * x[0]) * x[1] * (1.0 - x[1]);
         grad[1] = x[0] * (1.0 - x[0]) * (1.0 - 2.0 * x[1]);
         return grad;
@@ -342,7 +353,7 @@ TEST_F(QuadConvergenceTest, PolynomialSolution) {
 
     // Solve
     LaplaceDGSolver solver(mesh, 10.0);
-    Eigen::VectorXd solution = solver.solve(source);
+    DView1 solution = solver.solve(source);
 
     // Compute error
     auto errors = solver.compute_error(exact, exact_grad);

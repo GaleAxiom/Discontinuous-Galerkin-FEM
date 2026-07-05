@@ -12,12 +12,12 @@
 namespace dgfem {
 
 MonomialBasisTriangle::MonomialBasisTriangle(int order)
-    : OrthogonalBasis(std::make_shared<ReferenceTriangle>(), order) {
+    : OrthogonalBasisCRTP<MonomialBasisTriangle>(std::make_shared<ReferenceTriangle>(), order) {
     // Set n_basis_ after construction
-    n_basis_ = compute_n_basis();
+    n_basis_ = compute_n_basis_impl();
 }
 
-int MonomialBasisTriangle::compute_n_basis() const {
+int MonomialBasisTriangle::compute_n_basis_impl() const {
     return (order_ + 1) * (order_ + 2) / 2;
 }
 
@@ -27,8 +27,8 @@ double MonomialBasisTriangle::safe_power(double x, int n) const {
     return std::pow(x, n);
 }
 
-Eigen::VectorXd MonomialBasisTriangle::evaluate(const Eigen::Vector2d& xi) const {
-    Eigen::VectorXd phi(n_basis_);
+DView1 MonomialBasisTriangle::evaluate_impl(const Vec2& xi) const {
+    DView1 phi("monomial_phi", n_basis_);
 
     int idx = 0;
     for (int total_degree = 0; total_degree <= order_; ++total_degree) {
@@ -42,8 +42,8 @@ Eigen::VectorXd MonomialBasisTriangle::evaluate(const Eigen::Vector2d& xi) const
     return phi;
 }
 
-Eigen::MatrixXd MonomialBasisTriangle::evaluate_gradient(const Eigen::Vector2d& xi) const {
-    Eigen::MatrixXd grad(n_basis_, 2);
+DView2 MonomialBasisTriangle::evaluate_gradient_impl(const Vec2& xi) const {
+    DView2 grad("monomial_grad", n_basis_, 2);
 
     int idx = 0;
     for (int total_degree = 0; total_degree <= order_; ++total_degree) {

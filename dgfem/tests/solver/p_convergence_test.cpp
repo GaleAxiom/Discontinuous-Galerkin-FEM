@@ -3,10 +3,10 @@
  * @brief Tests for p-refinement convergence rates of DG solver
  */
 
-#include <Eigen/Dense>
 #include <cmath>
 #include <dgfem/boundary/conditions.hpp>
 #include <dgfem/core/space.hpp>
+#include <dgfem/kokkos_math.hpp>
 #include <dgfem/solver/dg_solver.hpp>
 #include <dgfem/utils/mesh_creation.hpp>
 
@@ -41,18 +41,18 @@ TEST_F(PRefinementTest, SmoothSolutionPConvergence) {
     // -Δu = 2π²sin(πx)sin(πy)
 
     const double pi = M_PI;
-    auto exact = [pi](const Eigen::Vector2d& x) -> double {
+    auto exact = [pi](const Vec2& x) -> double {
         return std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
-    auto exact_grad = [pi](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-        Eigen::Vector2d grad;
+    auto exact_grad = [pi](const Vec2& x) -> Vec2 {
+        Vec2 grad;
         grad[0] = pi * std::cos(pi * x[0]) * std::sin(pi * x[1]);
         grad[1] = pi * std::sin(pi * x[0]) * std::cos(pi * x[1]);
         return grad;
     };
 
-    auto source = [pi](const Eigen::Vector2d& x) -> double {
+    auto source = [pi](const Vec2& x) -> double {
         return 2.0 * pi * pi * std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
@@ -77,7 +77,7 @@ TEST_F(PRefinementTest, SmoothSolutionPConvergence) {
         mesh->set_boundary_condition("Right", bc_zero);
 
         LaplaceDGSolver solver(mesh, penalty);
-        Eigen::VectorXd solution = solver.solve(source);
+        DView1 solution = solver.solve(source);
 
         auto errors = solver.compute_error(exact, exact_grad);
         l2_errors.push_back(errors["L2"]);
@@ -103,7 +103,7 @@ TEST_F(PRefinementTest, PolynomialSolutionExactness) {
 
     for (int p : orders) {
         // Test with polynomial of degree p
-        auto exact_poly = [p](const Eigen::Vector2d& x) -> double {
+        auto exact_poly = [p](const Vec2& x) -> double {
             double result = 0.0;
             for (int i = 0; i <= p; ++i) {
                 for (int j = 0; j <= p; ++j) {
@@ -116,7 +116,7 @@ TEST_F(PRefinementTest, PolynomialSolutionExactness) {
         };
 
         // Compute Laplacian analytically (will be polynomial of degree p-2)
-        auto source = [p](const Eigen::Vector2d& x) -> double {
+        auto source = [p](const Vec2& x) -> double {
             double result = 0.0;
             for (int i = 2; i <= p; ++i) {
                 for (int j = 0; j <= p; ++j) {
@@ -135,8 +135,8 @@ TEST_F(PRefinementTest, PolynomialSolutionExactness) {
             return result;
         };
 
-        auto exact_grad = [p](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-            Eigen::Vector2d grad = Eigen::Vector2d::Zero();
+        auto exact_grad = [p](const Vec2& x) -> Vec2 {
+            Vec2 grad = Vec2{0.0, 0.0};
             for (int i = 1; i <= p; ++i) {
                 for (int j = 0; j <= p; ++j) {
                     if (i + j <= p) {
@@ -167,7 +167,7 @@ TEST_F(PRefinementTest, PolynomialSolutionExactness) {
         mesh->set_boundary_condition("Right", bc_func);
 
         LaplaceDGSolver solver(mesh, 10.0);
-        Eigen::VectorXd solution = solver.solve(source);
+        DView1 solution = solver.solve(source);
 
         auto errors = solver.compute_error(exact_poly, exact_grad);
 
@@ -184,18 +184,18 @@ TEST_F(PRefinementTest, HPRefinementCombination) {
     // Use smooth solution
 
     const double pi = M_PI;
-    auto exact = [pi](const Eigen::Vector2d& x) -> double {
+    auto exact = [pi](const Vec2& x) -> double {
         return std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
-    auto exact_grad = [pi](const Eigen::Vector2d& x) -> Eigen::Vector2d {
-        Eigen::Vector2d grad;
+    auto exact_grad = [pi](const Vec2& x) -> Vec2 {
+        Vec2 grad;
         grad[0] = pi * std::cos(pi * x[0]) * std::sin(pi * x[1]);
         grad[1] = pi * std::sin(pi * x[0]) * std::cos(pi * x[1]);
         return grad;
     };
 
-    auto source = [pi](const Eigen::Vector2d& x) -> double {
+    auto source = [pi](const Vec2& x) -> double {
         return 2.0 * pi * pi * std::sin(pi * x[0]) * std::sin(pi * x[1]);
     };
 
@@ -217,7 +217,7 @@ TEST_F(PRefinementTest, HPRefinementCombination) {
         mesh->set_boundary_condition("Right", bc_zero);
 
         LaplaceDGSolver solver(mesh, penalty);
-        Eigen::VectorXd solution = solver.solve(source);
+        DView1 solution = solver.solve(source);
 
         auto errors = solver.compute_error(exact, exact_grad);
         l2_errors.push_back(errors["L2"]);

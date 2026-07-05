@@ -6,24 +6,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Set up Eigen - try system first, then fall back to bundled version
-find_package(Eigen3 3.3 QUIET NO_MODULE)
-if(Eigen3_FOUND)
-    message(STATUS "Found system Eigen3: ${EIGEN3_INCLUDE_DIR}")
-else()
-    message(STATUS "Using bundled Eigen3")
-    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/eigen)
-    if(NOT EXISTS "${EIGEN3_INCLUDE_DIR}")
-        message(FATAL_ERROR "Bundled Eigen3 not found at ${EIGEN3_INCLUDE_DIR}")
-    endif()
-    add_library(Eigen3::Eigen INTERFACE IMPORTED)
-    set_target_properties(Eigen3::Eigen PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES "${EIGEN3_INCLUDE_DIR}")
-endif()
-
-# Trilinos: replaces Eigen for all linear algebra (see TRILINOS.md for the build recipe --
-# no prebuilt package exists for macOS ARM64, so it must be built from source). Both are
-# linked during the migration; Eigen is being removed incrementally, package by package.
+# Trilinos: sole linear algebra dependency (see TRILINOS.md for the build recipe --
+# no prebuilt package exists for macOS ARM64, so it must be built from source).
 find_package(Trilinos REQUIRED)
 message(STATUS "Found Trilinos ${Trilinos_VERSION} at ${Trilinos_DIR}")
 
@@ -59,7 +43,7 @@ if(BUILD_TESTS)
 endif()
 
 # Include directories
-include_directories(include ${EIGEN3_INCLUDE_DIR})
+include_directories(include)
 
 # Collect source files
 file(GLOB_RECURSE DGFEM_SOURCES 
@@ -75,16 +59,13 @@ target_compile_options(dgfem PRIVATE
     $<$<CONFIG:Debug>:-O0 -g>
 )
 
-# Eigen optimizations
 target_compile_definitions(dgfem PRIVATE
-    $<$<CONFIG:Release>:EIGEN_NO_DEBUG>
     $<$<CONFIG:Release>:NDEBUG>
 )
 
 # Link libraries
 target_link_libraries(dgfem
     PUBLIC
-        Eigen3::Eigen
         Trilinos::all_libs
         ${GMSH_LIBRARY}
 )

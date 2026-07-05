@@ -10,8 +10,6 @@
 #include "dgfem/reference/elements.hpp"
 #include "dgfem/reference/mapping.hpp"
 
-#include <Eigen/Dense>
-
 #include <map>
 #include <memory>
 #include <string>
@@ -38,49 +36,47 @@ public:
      * @param face_neighbors Neighbor information for each face
      * @return Element data dictionary
      */
-    [[nodiscard]] std::map<std::string, Eigen::MatrixXd>
-    compute_element_data(const Eigen::MatrixXd& vertices,
+    [[nodiscard]] std::map<std::string, DView2>
+    compute_element_data(const DView2& vertices,
                          const std::vector<std::pair<int, int>>& face_neighbors = {}) const;
 
     /**
      * @brief Compute face data for element face
      */
-    [[nodiscard]] std::map<std::string, Eigen::VectorXd>
-    compute_face_data(const Eigen::MatrixXd& vertices, int face_id,
+    [[nodiscard]] std::map<std::string, DView2>
+    compute_face_data(const DView2& vertices, int face_id,
                       const std::pair<int, int>& neighbor_info = {-1, -1}) const;
 
     /**
      * @brief Get precomputed basis values at volume quadrature points
      */
-    [[nodiscard]] const Eigen::MatrixXd& get_volume_basis_values() const noexcept {
-        return phi_vol_;
-    }
+    [[nodiscard]] const DView2& get_volume_basis_values() const noexcept { return phi_vol_; }
 
     /**
      * @brief Get precomputed basis gradients at volume quadrature points
      */
-    [[nodiscard]] const std::vector<Eigen::MatrixXd>& get_volume_basis_gradients() const noexcept {
+    [[nodiscard]] const std::vector<DView2>& get_volume_basis_gradients() const noexcept {
         return dphi_vol_;
     }
 
     /**
      * @brief Get precomputed basis values at face quadrature points
      */
-    [[nodiscard]] const std::vector<Eigen::MatrixXd>& get_face_basis_values() const noexcept {
+    [[nodiscard]] const std::vector<DView2>& get_face_basis_values() const noexcept {
         return phi_face_;
     }
 
     /**
      * @brief Compute face permutation for neighboring elements
      */
-    [[nodiscard]] Eigen::VectorXi
-    compute_face_permutation(int elem1_face, const Eigen::MatrixXd& elem1_vertices, int elem2_face,
-                             const Eigen::MatrixXd& elem2_vertices) const;
+    [[nodiscard]] IView1 compute_face_permutation(int elem1_face, const DView2& elem1_vertices,
+                                                  int elem2_face,
+                                                  const DView2& elem2_vertices) const;
 
     /**
      * @brief Map 1D face quadrature point to reference element face
      */
-    [[nodiscard]] Eigen::Vector2d map_face_quad_point(int face_id, double s) const;
+    [[nodiscard]] Vec2 map_face_quad_point(int face_id, double s) const;
 
     /**
      * @brief Get the mapping from local DoF index to local vertex index.
@@ -118,9 +114,9 @@ private:
     std::shared_ptr<GeometricMapping> mapping_;
 
     // Precomputed basis values
-    Eigen::MatrixXd phi_vol_;                ///< Volume basis values
-    std::vector<Eigen::MatrixXd> dphi_vol_;  ///< Volume basis gradients
-    std::vector<Eigen::MatrixXd> phi_face_;  ///< Face basis values
+    DView2 phi_vol_;                ///< Volume basis values
+    std::vector<DView2> dphi_vol_;  ///< Volume basis gradients
+    std::vector<DView2> phi_face_;  ///< Face basis values
 
     /**
      * @brief Precompute basis values at quadrature points

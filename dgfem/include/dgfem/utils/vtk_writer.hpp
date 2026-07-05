@@ -10,8 +10,7 @@
 
 #include "dgfem/core/mesh.hpp"
 #include "dgfem/core/solution.hpp"
-
-#include <Eigen/Dense>
+#include "dgfem/kokkos_math.hpp"
 
 #include <functional>
 #include <memory>
@@ -42,7 +41,7 @@ public:
      * - 3: Subdivide each element 3x (good balance)
      * - 5+: High quality visualization for high-order solutions
      */
-    static void write_solution(std::shared_ptr<DGMesh> mesh, const Eigen::VectorXd& solution,
+    static void write_solution(std::shared_ptr<DGMesh> mesh, const DView1& solution,
                                const std::string& filename,
                                const std::string& variable_name = "solution",
                                int resolution_factor = 3);
@@ -57,7 +56,7 @@ public:
      * @param resolution_factor Subdivision factor for visualization
      */
     static void write_multi_variable_solution(std::shared_ptr<DGMesh> mesh,
-                                              const std::vector<Eigen::VectorXd>& solutions,
+                                              const std::vector<DView1>& solutions,
                                               const std::vector<std::string>& variable_names,
                                               const std::string& filename,
                                               int resolution_factor = 3);
@@ -75,8 +74,7 @@ public:
      * - Conserved: rho, rho*u, rho*v, E
      * - Primitive: density, u_velocity, v_velocity, pressure, temperature, Mach
      */
-    static void write_euler_solution(std::shared_ptr<DGMesh> mesh,
-                                     const Eigen::MatrixXd& solution_matrix,
+    static void write_euler_solution(std::shared_ptr<DGMesh> mesh, const DView2& solution_matrix,
                                      const std::string& filename, double gamma = 1.4,
                                      int resolution_factor = 3);
 
@@ -99,8 +97,8 @@ public:
      * @param filename Output filename (without extension)
      * @param resolution_factor Subdivision factor for visualization
      */
-    static void write_with_analytical(std::shared_ptr<DGMesh> mesh, const Eigen::VectorXd& solution,
-                                      std::function<double(const Eigen::Vector2d&)> analytical_func,
+    static void write_with_analytical(std::shared_ptr<DGMesh> mesh, const DView1& solution,
+                                      std::function<double(const Vec2&)> analytical_func,
                                       const std::string& filename, int resolution_factor = 3);
 
 private:
@@ -116,8 +114,7 @@ private:
      * @param vis_connectivity Output: connectivity of visualization sub-elements
      */
     static void generate_visualization_mesh(std::shared_ptr<DGMesh> mesh, int resolution_factor,
-                                            Eigen::MatrixXd& vis_vertices,
-                                            Eigen::MatrixXi& vis_connectivity);
+                                            DView2& vis_vertices, IView2& vis_connectivity);
 
     /**
      * @brief Evaluate DG solution at visualization points
@@ -128,10 +125,10 @@ private:
      * @param resolution_factor Subdivision factor used
      * @return Solution values at visualization points
      */
-    [[nodiscard]] static Eigen::VectorXd evaluate_at_points(std::shared_ptr<DGMesh> mesh,
-                                                            const Eigen::VectorXd& solution,
-                                                            const Eigen::MatrixXd& vis_vertices,
-                                                            int resolution_factor);
+    [[nodiscard]] static DView1 evaluate_at_points(std::shared_ptr<DGMesh> mesh,
+                                                   const DView1& solution,
+                                                   const DView2& vis_vertices,
+                                                   int resolution_factor);
 
     /**
      * @brief Get reference coordinates for subdivision points
@@ -140,8 +137,8 @@ private:
      * @param resolution_factor Subdivision factor
      * @return Matrix of reference coordinates (n_points x 2)
      */
-    [[nodiscard]] static Eigen::MatrixXd
-    get_reference_subdivision_points(std::string_view element_type, int resolution_factor);
+    [[nodiscard]] static DView2 get_reference_subdivision_points(std::string_view element_type,
+                                                                 int resolution_factor);
 
     /**
      * @brief Get connectivity for subdivided reference element
@@ -150,7 +147,7 @@ private:
      * @param resolution_factor Subdivision factor
      * @return Matrix of connectivity indices (n_sub_elements x vertices_per_element)
      */
-    [[nodiscard]] static Eigen::MatrixXi
+    [[nodiscard]] static IView2
     get_reference_subdivision_connectivity(std::string_view element_type, int resolution_factor);
 
     /**
@@ -161,12 +158,12 @@ private:
     /**
      * @brief Write VTK points section
      */
-    static void write_vtk_points(std::ofstream& file, const Eigen::MatrixXd& vertices);
+    static void write_vtk_points(std::ofstream& file, const DView2& vertices);
 
     /**
      * @brief Write VTK cells section
      */
-    static void write_vtk_cells(std::ofstream& file, const Eigen::MatrixXi& connectivity,
+    static void write_vtk_cells(std::ofstream& file, const IView2& connectivity,
                                 const std::string& element_type);
 
     /**
@@ -174,7 +171,7 @@ private:
      */
     static void
     write_vtk_point_data(std::ofstream& file,
-                         const std::vector<std::pair<std::string, Eigen::VectorXd>>& data_arrays);
+                         const std::vector<std::pair<std::string, DView1>>& data_arrays);
 
     /**
      * @brief Get VTK cell type identifier

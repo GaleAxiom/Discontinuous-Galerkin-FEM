@@ -10,6 +10,7 @@
 #include "dgfem/utils/example_helpers.hpp"
 #include "dgfem/utils/vtk_writer.hpp"
 
+#include <Kokkos_Core.hpp>
 #include <cmath>
 
 #include <iomanip>
@@ -26,7 +27,7 @@ struct TaylorGreenVortex {
         : rho0(rho0_), U0(U0_), kx(kx_), ky(ky_), nu(nu_), gamma(gamma_), p0(p0_) {}
 
     // Primitive variables [rho, u, v, p] at position (x, y) and time t
-    Eigen::Vector4d operator()(double x, double y, double t) const {
+    dgfem::Vec4 operator()(double x, double y, double t) const {
         double decay = std::exp(-2.0 * nu * (kx * kx + ky * ky) * t);
         double u = -U0 * std::cos(kx * x) * std::sin(ky * y) * decay;
         double v = U0 * std::sin(kx * x) * std::cos(ky * y) * decay;
@@ -36,7 +37,7 @@ struct TaylorGreenVortex {
         double p = p0 + p_dyn;
         double rho = rho0 * std::pow(p / p0, 1.0 / gamma);  // Isentropic
 
-        return dgfem::primitive_to_conserved(Eigen::Vector4d(rho, u, v, p), gamma);
+        return dgfem::primitive_to_conserved(dgfem::Vec4{rho, u, v, p}, gamma);
     }
 };
 
@@ -44,7 +45,7 @@ struct TaylorGreenVortex {
  * @brief Compute L2 error for a specific variable
  */
 double compute_variable_error(const std::shared_ptr<dgfem::DGMesh>& mesh,
-                              const Eigen::MatrixXd& numerical_sol, const TaylorGreenVortex& exact,
+                              const dgfem::DView2& numerical_sol, const TaylorGreenVortex& exact,
                               double time, double gamma, int var_idx) {
     auto dg_space = mesh->get_dg_space();
     auto mapping = dg_space->get_mapping();
@@ -58,24 +59,22 @@ double compute_variable_error(const std::shared_ptr<dgfem::DGMesh>& mesh,
     for (int e = 0; e < mesh->get_n_elements(); ++e) {
         const auto& J_det = mesh->get_element_data(e).at("J_det_vol");
 
-        Eigen::MatrixXd verts(mesh->get_elements().cols(), 2);
-        for (int i = 0; i < verts.rows(); ++i)
-            verts.row(i) = mesh->get_vertices().row(mesh->get_elements()(e, i));
+        dgfem::DView2 verts = mesh->get_element_vertices(e);
 
-        for (int q = 0; q < quad_wts.size(); ++q) {
-            Eigen::Vector2d x_phys = mapping->map_to_physical(verts, quad_pts.row(q));
+        for (int q = 0; q < static_cast<int>(quad_wts.size()); ++q) {
+            dgfem::Vec2 x_phys = mapping->map_to_physical(verts, dgfem::row2(quad_pts, q));
 
             // Numerical solution at quad point
-            Eigen::Vector4d U_num = Eigen::Vector4d::Zero();
+            dgfem::Vec4 U_num{0.0, 0.0, 0.0, 0.0};
             for (int i = 0; i < n_basis; ++i)
                 for (int v = 0; v < 4; ++v)
                     U_num[v] += numerical_sol(e, i * 4 + v) * phi(q, i);
 
-            Eigen::Vector4d U_exact = exact(x_phys[0], x_phys[1], time);
-            Eigen::Vector4d W_num = dgfem::conserved_to_primitive(U_num, gamma);
-            Eigen::Vector4d W_exact = dgfem::conserved_to_primitive(U_exact, gamma);
+            dgfem::Vec4 U_exact = exact(x_phys[0], x_phys[1], time);
+            dgfem::Vec4 W_num = dgfem::conserved_to_primitive(U_num, gamma);
+            dgfem::Vec4 W_exact = dgfem::conserved_to_primitive(U_exact, gamma);
 
-            double dw = quad_wts(q) * std::abs(J_det(q));
+            double dw = quad_wts(q) * std::abs(J_det(q, 0));
             error_sq +=
                 (W_num[var_idx] - W_exact[var_idx]) * (W_num[var_idx] - W_exact[var_idx]) * dw;
             norm_sq += W_exact[var_idx] * W_exact[var_idx] * dw;
@@ -85,7 +84,8 @@ double compute_variable_error(const std::shared_ptr<dgfem::DGMesh>& mesh,
     return std::sqrt(error_sq / norm_sq);
 }
 
-int main() {
+int main(int argc, char** argv) {
+    Kokkos::ScopeGuard kokkos_guard(argc, argv);
     try {
         std::cout << "=== DGFEM Taylor-Green Vortex Test ===" << std::endl;
 
@@ -109,7 +109,7 @@ int main() {
 
         // Analytical solution (inviscid: nu=0)
         TaylorGreenVortex exact(rho0, U0, k, k, 0.0, gamma, p0);
-        auto ic = [&exact](const Eigen::Vector2d& x) { return exact(x[0], x[1], 0.0); };
+        auto ic = [&exact](const dgfem::Vec2& x) { return exact(x[0], x[1], 0.0); };
 
         // Time stepping
         constexpr double dt = 0.001, T_final = 1.0;

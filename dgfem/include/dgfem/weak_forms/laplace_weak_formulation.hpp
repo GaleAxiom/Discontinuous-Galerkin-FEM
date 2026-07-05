@@ -29,9 +29,8 @@ public:
     /**
      * @brief Custom assembly for Laplace (overrides base class to use BoundaryCondition objects)
      */
-    void assemble(DGAssembler& assembler,
-                  std::function<double(const Eigen::Vector2d&)> source_func = nullptr,
-                  std::function<double(const Eigen::Vector2d&)> bc_func = nullptr) const override;
+    void assemble(DGAssembler& assembler, std::function<double(const Vec2&)> source_func = nullptr,
+                  std::function<double(const Vec2&)> bc_func = nullptr) const override;
 
     /**
      * @brief Compute penalty parameter based on element size and polynomial order
@@ -41,45 +40,44 @@ public:
     /**
      * @brief Volume integral contribution (implements base class method)
      */
-    [[nodiscard]] Eigen::MatrixXd
-    compute_volume_integral(const std::map<std::string, Eigen::MatrixXd>& elem_data,
-                            std::shared_ptr<DGSpace> dg_space) const override;
+    [[nodiscard]] DView2 compute_volume_integral(const std::map<std::string, DView2>& elem_data,
+                                                 std::shared_ptr<DGSpace> dg_space) const override;
 
     /**
      * @brief Interior face integral contribution (implements base class method)
      */
-    [[nodiscard]] std::tuple<Eigen::MatrixXd, Eigen::MatrixXd, Eigen::MatrixXd, Eigen::MatrixXd>
-    compute_interior_face_integral(
-        int elem_L, int face_L, int elem_R, int face_R, std::shared_ptr<DGMesh> mesh,
-        const Eigen::VectorXi& permutation = Eigen::VectorXi()) const override;
+    [[nodiscard]] std::tuple<DView2, DView2, DView2, DView2>
+    compute_interior_face_integral(int elem_L, int face_L, int elem_R, int face_R,
+                                   std::shared_ptr<DGMesh> mesh,
+                                   const IView1& permutation = IView1()) const override;
 
     /**
      * @brief Boundary face integral contribution (implements base class method)
      */
-    [[nodiscard]] Eigen::MatrixXd
+    [[nodiscard]] DView2
     compute_boundary_face_integral(int elem_id, int face_id, std::shared_ptr<DGMesh> mesh,
                                    std::shared_ptr<BoundaryCondition> bc) const override;
 
     /**
      * @brief Source integral contribution (implements base class method)
      */
-    [[nodiscard]] Eigen::VectorXd
-    compute_source_integral(int elem_id, std::function<double(const Eigen::Vector2d&)> source_func,
-                            std::shared_ptr<DGMesh> mesh) const override;
+    [[nodiscard]] DView1 compute_source_integral(int elem_id,
+                                                 std::function<double(const Vec2&)> source_func,
+                                                 std::shared_ptr<DGMesh> mesh) const override;
 
     /**
      * @brief Boundary RHS contribution (implements base class method)
      */
-    [[nodiscard]] Eigen::VectorXd
+    [[nodiscard]] DView1
     compute_boundary_rhs_integral(int elem_id, int face_id, std::shared_ptr<DGMesh> mesh,
                                   std::shared_ptr<BoundaryCondition> bc) const override;
 
     /**
      * @brief Helper function to interpolate gradients to face quadrature points
      */
-    [[nodiscard]] Eigen::MatrixXd
-    interpolate_gradient_to_face(const std::map<std::string, Eigen::MatrixXd>& elem_data,
-                                 int face_id, std::shared_ptr<DGSpace> dg_space) const;
+    [[nodiscard]] DView2
+    interpolate_gradient_to_face(const std::map<std::string, DView2>& elem_data, int face_id,
+                                 std::shared_ptr<DGSpace> dg_space) const;
 
 private:
     double sigma_0_;  ///< Base penalty parameter

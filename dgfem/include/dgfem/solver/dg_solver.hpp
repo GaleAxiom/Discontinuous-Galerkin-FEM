@@ -7,7 +7,6 @@
 
 #include "dgfem/core/mesh.hpp"
 
-#include <Eigen/Dense>
 #include <cstdint>
 #include <filesystem>
 
@@ -138,8 +137,7 @@ public:
     /**
      * @brief Solve Laplace equation with optional source term
      */
-    [[nodiscard]] Eigen::VectorXd
-    solve(std::function<double(const Eigen::Vector2d&)> source_func = nullptr);
+    [[nodiscard]] DView1 solve(std::function<double(const Vec2&)> source_func = nullptr);
 
     [[nodiscard]] Teuchos::RCP<const TpetraCrsMatrix> get_system_matrix() const override;
 
@@ -151,9 +149,9 @@ public:
     /**
      * @brief Compute L2 and H1 errors against exact solution
      */
-    [[nodiscard]] std::map<std::string, double> compute_error(
-        std::function<double(const Eigen::Vector2d&)> exact_solution,
-        std::function<Eigen::Vector2d(const Eigen::Vector2d&)> exact_gradient = nullptr) const;
+    [[nodiscard]] std::map<std::string, double>
+    compute_error(std::function<double(const Vec2&)> exact_solution,
+                  std::function<Vec2(const Vec2&)> exact_gradient = nullptr) const;
 
 private:
     std::shared_ptr<LaplaceWeakFormulation> weak_form_;
@@ -164,7 +162,7 @@ private:
  */
 class AdvectionDGSolver : public DGSolverBase {
 public:
-    AdvectionDGSolver(std::shared_ptr<DGMesh> mesh, const Eigen::Vector2d& advection_velocity);
+    AdvectionDGSolver(std::shared_ptr<DGMesh> mesh, const Vec2& advection_velocity);
 
     // Delete copy, default move
     AdvectionDGSolver(const AdvectionDGSolver&) = delete;
@@ -175,21 +173,20 @@ public:
     /**
      * @brief Solve advection equation with time stepping
      */
-    [[nodiscard]] std::vector<Eigen::VectorXd>
-    solve(std::function<double(const Eigen::Vector2d&)> initial_condition, double T_final,
-          double dt, std::shared_ptr<BoundaryCondition> boundary_condition = nullptr,
-          int save_every = 1);
+    [[nodiscard]] std::vector<Teuchos::RCP<TpetraMultiVector>>
+    solve(std::function<double(const Vec2&)> initial_condition, double T_final, double dt,
+          std::shared_ptr<BoundaryCondition> boundary_condition = nullptr, int save_every = 1);
 
     [[nodiscard]] Teuchos::RCP<const TpetraCrsMatrix> get_system_matrix() const override;
 
 private:
     std::shared_ptr<AdvectionWeakFormulation> weak_form_;
-    Eigen::Vector2d advection_velocity_;
+    Vec2 advection_velocity_;
 
     // Precomputed operators for time stepping
     Teuchos::RCP<const TpetraCrsMatrix> L_operator_;    // Spatial operator
     Teuchos::RCP<const TpetraMultiVector> F_boundary_;  // Boundary forcing
-    std::vector<Eigen::MatrixXd> M_inv_blocks_;         // Mass matrix inverse blocks per element
+    std::vector<DView2> M_inv_blocks_;                  // Mass matrix inverse blocks per element
 
     /**
      * @brief Precompute mass matrix inverse blocks
@@ -197,25 +194,28 @@ private:
     void compute_mass_matrix_inverse_blocks();
 
     /**
-     * @brief Apply inverse mass matrix M^{-1} * vec
+     * @brief Apply inverse mass matrix M^{-1} * vec (global vector, one Tpetra apply per block)
      */
-    [[nodiscard]] Eigen::VectorXd apply_mass_inv(const Eigen::VectorXd& vec) const;
+    [[nodiscard]] Teuchos::RCP<TpetraMultiVector>
+    apply_mass_inv(const Teuchos::RCP<const TpetraMultiVector>& vec) const;
 
     /**
      * @brief Project initial condition using L2 projection
      */
-    [[nodiscard]] Eigen::VectorXd
-    project_initial_condition(std::function<double(const Eigen::Vector2d&)> u0_func);
+    [[nodiscard]] Teuchos::RCP<TpetraMultiVector>
+    project_initial_condition(std::function<double(const Vec2&)> u0_func);
 
     /**
      * @brief Time stepping using SSP-RK3 (Strong Stability Preserving Runge-Kutta 3rd order)
      */
-    [[nodiscard]] Eigen::VectorXd time_step_ssp_rk3(const Eigen::VectorXd& u_n, double dt) const;
+    [[nodiscard]] Teuchos::RCP<TpetraMultiVector>
+    time_step_ssp_rk3(const Teuchos::RCP<TpetraMultiVector>& u_n, double dt) const;
 
     /**
      * @brief Compute RHS for time stepping: M^{-1} * (L*u + F_bc)
      */
-    [[nodiscard]] Eigen::VectorXd compute_rhs(const Eigen::VectorXd& u) const;
+    [[nodiscard]] Teuchos::RCP<TpetraMultiVector>
+    compute_rhs(const Teuchos::RCP<TpetraMultiVector>& u) const;
 };
 
 /**
@@ -223,7 +223,7 @@ private:
  */
 class CompressibleDGSolverBase : public DGSolverBase {
 public:
-    using StateVector = std::vector<Eigen::MatrixXd>;
+    using StateVector = std::vector<DView2>;
 
     [[nodiscard]] Teuchos::RCP<const TpetraCrsMatrix> get_system_matrix() const override;
 
@@ -235,13 +235,12 @@ protected:
     [[nodiscard]] StateVector assemble_residual(const StateVector& u_coeffs) const;
     void compute_mass_matrix_inverse_blocks();
     [[nodiscard]] StateVector apply_mass_inv(const StateVector& vec) const;
-    [[nodiscard]] StateVector
-    project_initial_condition(std::function<Eigen::Vector4d(const Eigen::Vector2d&)> u0_func);
+    [[nodiscard]] StateVector project_initial_condition(std::function<Vec4(const Vec2&)> u0_func);
     [[nodiscard]] StateVector time_step_ssp_rk3(const StateVector& u_n, double dt) const;
     [[nodiscard]] double compute_max_cfl(const StateVector& u_coeffs, double dt) const;
-    [[nodiscard]] std::vector<Eigen::MatrixXd>
-    run_time_integration(std::function<Eigen::Vector4d(const Eigen::Vector2d&)> initial_condition,
-                         double T_final, double dt, int save_every);
+    [[nodiscard]] std::vector<DView2>
+    run_time_integration(std::function<Vec4(const Vec2&)> initial_condition, double T_final,
+                         double dt, int save_every);
     [[nodiscard]] std::pair<double, double>
     compute_density_range(const StateVector& u_coeffs) const;
 
@@ -249,12 +248,11 @@ protected:
     double gamma_;
 
 private:
-    std::vector<Eigen::MatrixXd> M_inv_blocks_;
+    std::vector<DView2> M_inv_blocks_;
     std::string solver_label_;
     mutable StateVector residual_buffer_;
 
-    [[nodiscard]] std::vector<Eigen::MatrixXd>
-    flatten_frames(const std::vector<StateVector>& frames) const;
+    [[nodiscard]] std::vector<DView2> flatten_frames(const std::vector<StateVector>& frames) const;
 };
 
 /**
@@ -271,9 +269,8 @@ public:
     EulerDGSolver(EulerDGSolver&&) noexcept = default;
     EulerDGSolver& operator=(EulerDGSolver&&) noexcept = default;
 
-    [[nodiscard]] std::vector<Eigen::MatrixXd>
-    solve(std::function<Eigen::Vector4d(const Eigen::Vector2d&)> initial_condition, double T_final,
-          double dt, int save_every = 1);
+    [[nodiscard]] std::vector<DView2> solve(std::function<Vec4(const Vec2&)> initial_condition,
+                                            double T_final, double dt, int save_every = 1);
 };
 
 /**
@@ -291,9 +288,8 @@ public:
     NavierStokesDGSolver(NavierStokesDGSolver&&) noexcept = default;
     NavierStokesDGSolver& operator=(NavierStokesDGSolver&&) noexcept = default;
 
-    [[nodiscard]] std::vector<Eigen::MatrixXd>
-    solve(std::function<Eigen::Vector4d(const Eigen::Vector2d&)> initial_condition, double T_final,
-          double dt, int save_every = 1);
+    [[nodiscard]] std::vector<DView2> solve(std::function<Vec4(const Vec2&)> initial_condition,
+                                            double T_final, double dt, int save_every = 1);
 };
 
 }  // namespace dgfem

@@ -12,12 +12,12 @@
 namespace dgfem {
 
 DubinerBasis::DubinerBasis(int order)
-    : OrthogonalBasis(std::make_shared<ReferenceTriangle>(), order) {
+    : OrthogonalBasisCRTP<DubinerBasis>(std::make_shared<ReferenceTriangle>(), order) {
     // Set n_basis_ after construction
-    n_basis_ = compute_n_basis();
+    n_basis_ = compute_n_basis_impl();
 }
 
-int DubinerBasis::compute_n_basis() const {
+int DubinerBasis::compute_n_basis_impl() const {
     return (order_ + 1) * (order_ + 2) / 2;
 }
 
@@ -52,7 +52,7 @@ double DubinerBasis::jacobi_derivative(int n, double alpha, double beta, double 
     return 0.5 * (n + alpha + beta + 1.0) * jacobi_polynomial(n - 1, alpha + 1.0, beta + 1.0, x);
 }
 
-std::pair<double, double> DubinerBasis::transform_coordinates(const Eigen::Vector2d& xi) const {
+std::pair<double, double> DubinerBasis::transform_coordinates(const Vec2& xi) const {
     // Transform from reference triangle (xi, eta) to Dubiner collapsed coordinates (r, s)
     // Using the Duffy transform for the reference triangle with vertices (0,0), (1,0), (0,1)
     // Reference: Hesthaven & Warburton, "Nodal Discontinuous Galerkin Methods"
@@ -89,13 +89,13 @@ std::pair<int, int> DubinerBasis::get_dubiner_indices(int basis_idx) const {
     return {0, 0};  // Should never reach here
 }
 
-Eigen::VectorXd DubinerBasis::evaluate(const Eigen::Vector2d& xi) const {
-    Eigen::Vector2d xi_eval = xi;
+DView1 DubinerBasis::evaluate_impl(const Vec2& xi) const {
+    Vec2 xi_eval = xi;
     if (!ref_element_->contains_point(xi_eval)) {
         ref_element_->project_to_bounds(xi_eval);
     }
 
-    Eigen::VectorXd phi(n_basis_);
+    DView1 phi("dubiner_phi", n_basis_);
 
     auto [r, s] = transform_coordinates(xi_eval);
 
@@ -115,13 +115,13 @@ Eigen::VectorXd DubinerBasis::evaluate(const Eigen::Vector2d& xi) const {
     return phi;
 }
 
-Eigen::MatrixXd DubinerBasis::evaluate_gradient(const Eigen::Vector2d& xi) const {
-    Eigen::Vector2d xi_eval = xi;
+DView2 DubinerBasis::evaluate_gradient_impl(const Vec2& xi) const {
+    Vec2 xi_eval = xi;
     if (!ref_element_->contains_point(xi_eval)) {
         ref_element_->project_to_bounds(xi_eval);
     }
 
-    Eigen::MatrixXd grad(n_basis_, 2);
+    DView2 grad("dubiner_grad", n_basis_, 2);
 
     auto [r, s] = transform_coordinates(xi_eval);
     const double xi_val = xi_eval[0];

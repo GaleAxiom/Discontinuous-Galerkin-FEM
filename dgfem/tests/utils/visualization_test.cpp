@@ -1,7 +1,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 // #include <dgfem/utils/visualization.hpp>
-#include <Eigen/Dense>
 #include <cmath>
 #include <dgfem/core/mesh.hpp>
 #include <dgfem/core/space.hpp>
