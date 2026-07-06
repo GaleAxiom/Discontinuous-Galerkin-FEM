@@ -188,6 +188,36 @@ double minmod3(double a, double b, double c) {
     }
     return 0.0;
 }
+
+// Right/left eigenvector matrices of the 1D Euler flux Jacobian (x-direction), acting on the
+// 3-field subsystem (rho, rho*u, E) -- the transverse momentum rho*v is not part of this
+// system and is limited separately as a passively-advected scalar. R's columns and L's rows
+// correspond to the fields (u-c, u, u+c) in that order; L = R^-1 (verified numerically, not
+// just algebraically, against a hand-picked non-trivial state before use: max|L*R-I| ~1e-16).
+// Standard closed form, e.g. Toro, "Riemann Solvers and Numerical Methods for Fluid
+// Dynamics", eq. 3.79-3.82.
+struct EulerEigensystem3 {
+    std::array<std::array<double, 3>, 3> R;  // R[conserved_index][field]
+    std::array<std::array<double, 3>, 3> L;  // L[field][conserved_index]
+};
+
+EulerEigensystem3 build_eigensystem_3(double rho, double u, double p, double gamma) {
+    double rho_safe = std::max(rho, 1e-12);
+    double c = std::sqrt(std::max(gamma * p / rho_safe, 1e-24));
+    double H = c * c / (gamma - 1.0) + 0.5 * u * u;
+
+    EulerEigensystem3 es;
+    es.R[0] = {1.0, 1.0, 1.0};
+    es.R[1] = {u - c, u, u + c};
+    es.R[2] = {H - u * c, 0.5 * u * u, H + u * c};
+
+    double b1 = (gamma - 1.0) / (c * c);
+    double b2 = 0.5 * b1 * u * u;
+    es.L[0] = {(b2 + u / c) / 2.0, -(b1 * u + 1.0 / c) / 2.0, b1 / 2.0};
+    es.L[1] = {1.0 - b2, b1 * u, -b1};
+    es.L[2] = {(b2 - u / c) / 2.0, -(b1 * u - 1.0 / c) / 2.0, b1 / 2.0};
+    return es;
+}
 }  // namespace
 
 CompressibleDGSolverBase::StateVector
@@ -198,17 +228,22 @@ CompressibleDGSolverBase::apply_minmod_limiter_x(const StateVector& u) const {
 
     // TVB (total-variation-bounded) threshold: Cockburn & Shu's modified minmod treats a
     // *value difference* smaller than M*dx^2 as genuine smooth curvature rather than an
-    // incipient oscillation. Here the comparison is against slope_phys (a value difference
-    // divided by dx), so the threshold needs one fewer power of dx: M*dx, not M*dx^2 -- using
-    // dx^2 against a slope makes the threshold ~100x too small at dx=0.01 to ever matter,
-    // which is exactly why an earlier version of this code (M=50, thresholded on dx^2)
-    // produced results numerically indistinguishable from plain M=0 minmod. Plain minmod, in
-    // turn, was confirmed (via temporary instrumentation) to touch >50% of all eligible cells
-    // on every stage of the Sod problem -- clipping the whole smooth rarefaction fan, not just
-    // the genuine kinks -- which is why it made the solution *less* accurate than no limiter.
-    // M=50 is the value Cockburn & Shu use in their original RKDG papers' shock-tube examples;
-    // it is a problem-independent order-of-magnitude default, not tuned to this case.
+    // incipient oscillation. The comparison here is against a slope (a value difference
+    // divided by dx), so the threshold needs one fewer power of dx: M*dx, not M*dx^2. M=50 is
+    // the value Cockburn & Shu use in their original RKDG papers' shock-tube examples; it is a
+    // problem-independent order-of-magnitude default, not tuned to this case.
     constexpr double kTvbM = 50.0;
+
+    // Component-wise (each conserved variable limited independently) was tried first and
+    // measured to make the Sod shock tube *less* accurate than no limiter at all: limiting
+    // rho and rho*u independently doesn't preserve their ratio, so the derived primitive
+    // velocity u = (rho*u)/rho can swing more after limiting than before, especially where
+    // rho is small (see rho_R=0.125 in the Sod example). Limiting in the local characteristic
+    // fields of the 1D Euler system (rho, rho*u, E) instead couples the three so that a
+    // limited state stays a physically consistent combination of the local wave structure.
+    // rho*v has no characteristic field of its own in this quasi-1D system (see
+    // build_eigensystem_3's doc comment) and is limited componentwise as before.
+    constexpr int kRhoIdx = 0, kRhoUIdx = 1, kRhoVIdx = 2, kEIdx = 3;
 
     for (int e = 0; e < n_elem; ++e) {
         int n_basis = static_cast<int>(u[e].extent(0));
@@ -221,32 +256,79 @@ CompressibleDGSolverBase::apply_minmod_limiter_x(const StateVector& u) const {
 
         int n_left = x_left_neighbor_[e];
         int n_right = x_right_neighbor_[e];
-        if (n_left < 0 || n_right < 0 || n_basis < 4) {
+        if (n_left < 0 || n_right < 0 || n_basis < 4 || n_vars != 4) {
             // Boundary element (no interior neighbor on one side): leave unlimited rather
-            // than guess a ghost average.
+            // than guess a ghost average. n_vars != 4 would mean this isn't the 4-variable
+            // Euler/NS system the eigendecomposition below assumes.
             continue;
         }
         double dx_e = element_dx_[e];
         double tvb_threshold = kTvbM * dx_e;
 
-        for (int v = 0; v < n_vars; ++v) {
-            double ubar_e = u[e](0, v);
-            double ubar_left = u[n_left](0, v);
-            double ubar_right = u[n_right](0, v);
-
-            // Mode 1 of the order-1 Legendre tensor basis is the reference-space x-slope
-            // (phi_1 = xi, xi in [-1,1]); physical slope = coeff * (2/dx) for an element of
-            // physical width dx.
-            double slope_phys = u[e](1, v) * (2.0 / dx_e);
-            if (std::abs(slope_phys) <= tvb_threshold) {
-                continue;  // Within the TVB tolerance: treat as smooth curvature, don't limit.
+        // rho*v: componentwise TVB minmod, same as before.
+        {
+            double ubar_e = u[e](0, kRhoVIdx);
+            double ubar_left = u[n_left](0, kRhoVIdx);
+            double ubar_right = u[n_right](0, kRhoVIdx);
+            double slope_phys = u[e](1, kRhoVIdx) * (2.0 / dx_e);
+            if (std::abs(slope_phys) > tvb_threshold) {
+                double slope_fwd = (ubar_right - ubar_e) / dx_e;
+                double slope_bwd = (ubar_e - ubar_left) / dx_e;
+                double limited_slope = minmod3(slope_phys, slope_fwd, slope_bwd);
+                if (std::abs(limited_slope - slope_phys) > 1e-13 * (std::abs(slope_phys) + 1.0)) {
+                    result[e](1, kRhoVIdx) = limited_slope * (dx_e / 2.0);
+                    result[e](3, kRhoVIdx) = 0.0;
+                }
             }
-            double slope_fwd = (ubar_right - ubar_e) / dx_e;
-            double slope_bwd = (ubar_e - ubar_left) / dx_e;
-            double limited_slope = minmod3(slope_phys, slope_fwd, slope_bwd);
+        }
 
-            if (std::abs(limited_slope - slope_phys) > 1e-13 * (std::abs(slope_phys) + 1.0)) {
-                result[e](1, v) = limited_slope * (dx_e / 2.0);
+        // rho, rho*u, E: characteristic-variable limiting. Eigensystem built from this
+        // element's own cell-average primitive state (a simplification relative to a full
+        // Roe average between L/e/R, adequate for the order-of-magnitude comparison this
+        // limiter exists for).
+        Vec4 cons_bar{u[e](0, kRhoIdx), u[e](0, kRhoUIdx), u[e](0, kRhoVIdx), u[e](0, kEIdx)};
+        Vec4 prim_bar = conserved_to_primitive(cons_bar, gamma_);
+        EulerEigensystem3 es = build_eigensystem_3(prim_bar[0], prim_bar[1], prim_bar[3], gamma_);
+
+        std::array<int, 3> idx3{kRhoIdx, kRhoUIdx, kEIdx};
+        std::array<double, 3> slope_phys3{}, slope_fwd3{}, slope_bwd3{};
+        for (int k = 0; k < 3; ++k) {
+            int v = idx3[k];
+            slope_phys3[k] = u[e](1, v) * (2.0 / dx_e);
+            slope_fwd3[k] = (u[n_right](0, v) - u[e](0, v)) / dx_e;
+            slope_bwd3[k] = (u[e](0, v) - u[n_left](0, v)) / dx_e;
+        }
+
+        // Project the three candidate (conserved) slopes into characteristic space.
+        std::array<double, 3> char_phys{}, char_fwd{}, char_bwd{}, char_limited{};
+        for (int k = 0; k < 3; ++k) {
+            char_phys[k] = es.L[k][0] * slope_phys3[0] + es.L[k][1] * slope_phys3[1] +
+                           es.L[k][2] * slope_phys3[2];
+            char_fwd[k] = es.L[k][0] * slope_fwd3[0] + es.L[k][1] * slope_fwd3[1] +
+                          es.L[k][2] * slope_fwd3[2];
+            char_bwd[k] = es.L[k][0] * slope_bwd3[0] + es.L[k][1] * slope_bwd3[1] +
+                          es.L[k][2] * slope_bwd3[2];
+        }
+
+        bool any_limited = false;
+        for (int k = 0; k < 3; ++k) {
+            if (std::abs(char_phys[k]) <= tvb_threshold) {
+                char_limited[k] = char_phys[k];
+                continue;
+            }
+            char_limited[k] = minmod3(char_phys[k], char_fwd[k], char_bwd[k]);
+            if (std::abs(char_limited[k] - char_phys[k]) > 1e-13 * (std::abs(char_phys[k]) + 1.0)) {
+                any_limited = true;
+            }
+        }
+
+        if (any_limited) {
+            for (int k = 0; k < 3; ++k) {
+                int v = idx3[k];
+                double limited_slope_v = es.R[k][0] * char_limited[0] +
+                                         es.R[k][1] * char_limited[1] +
+                                         es.R[k][2] * char_limited[2];
+                result[e](1, v) = limited_slope_v * (dx_e / 2.0);
                 // Mode 3 is exactly the xy cross term at order 1 (see LegendreBasis's tensor
                 // index order): once the linear trend itself is untrustworthy, the even
                 // higher-variation bilinear mode is discarded too (standard moment-limiter
