@@ -1,20 +1,24 @@
 /**
- * @file shear_flow_example.cpp
- * @brief Viscous shear flow example using the Navier-Stokes DG solver.
+ * @file couette_flow_example.cpp
+ * @brief Viscous Couette flow example: no-slip channel walls, periodic in x.
  *
- * This example mirrors the analytic shear flow used in the unit tests for
- * the Navier-Stokes weak formulation. The manufactured solution is
- * \(u(x, y) = (y, 0)\) with constant density and pressure. Mass and momentum
- * are exactly steady for this profile (the convective terms cancel and the
- * shear stress tau_xy = mu is spatially constant), but energy is not: simple
- * shear dissipates at a constant rate Phi = mu everywhere, and since
- * temperature is spatially uniform there is no heat-conduction term to carry
- * that heat away. Pressure therefore drifts upward at the small but nonzero
- * rate dp/dt ~= (gamma - 1) * mu -- e.g. for mu = 5e-6 and T_final = 0.02 this
- * predicts Delta p ~= 4.0e-8, matching the p error this example actually
- * measures. The example integrates the flow in time to demonstrate stability
- * and reports L2 error against the analytic profile, which is expected to be
- * of that order rather than exactly zero.
+ * Plane Couette flow between a stationary bottom wall and a top wall moving
+ * at U_wall, with periodic boundaries in x. The manufactured solution is
+ * \(u(x, y) = U_wall * y / H\) with constant density and pressure -- the same
+ * shear profile as shear_flow_example.cpp, but here it is bounded by actual
+ * NO_SLIP_WALL boundary conditions (one of them moving) instead of FAR_FIELD
+ * ghost states on all four sides. This exercises a different boundary code
+ * path (the wall treatment in both the inviscid Rusanov-flux ghost state and
+ * the viscous SIPG penalty) while keeping the interior physics identical.
+ *
+ * As with the shear flow example, mass and momentum are exactly steady for
+ * this profile, but energy is not: simple shear dissipates at a constant
+ * rate Phi = mu * (U_wall / H)^2 everywhere, and with spatially uniform
+ * temperature there is no heat-conduction term to remove it. With the same
+ * mu and an equal velocity gradient (U_wall = H = 1) as shear_flow_example,
+ * this predicts the same small pressure drift, Delta p ~= (gamma - 1) * mu *
+ * T_final ~= 4.0e-8 for the parameters below -- a useful cross-check that
+ * the wall BC path and the far-field BC path agree on the same physics.
  */
 
 #include "dgfem/boundary/conditions.hpp"
@@ -33,13 +37,15 @@
 namespace {
 
 /**
- * @brief Analytic shear flow profile used for ICs and boundary conditions.
+ * @brief Analytic Couette flow profile used for ICs and boundary conditions.
  */
-struct ShearFlowAnalytic {
+struct CouetteFlowAnalytic {
     double gamma;
+    double u_wall;
+    double height;
 
     [[nodiscard]] dgfem::Vec4 primitive(const dgfem::Vec2& x) const {
-        return dgfem::Vec4{1.0, x[1], 0.0, 1.0};
+        return dgfem::Vec4{1.0, u_wall * x[1] / height, 0.0, 1.0};
     }
 
     [[nodiscard]] dgfem::Vec4 conserved(const dgfem::Vec2& x) const {
@@ -51,7 +57,7 @@ struct ShearFlowAnalytic {
  * @brief Compute an L2-like error for a primitive variable against the analytic state.
  */
 double compute_variable_error(const std::shared_ptr<dgfem::DGMesh>& mesh,
-                              const dgfem::DView2& numerical_sol, const ShearFlowAnalytic& exact,
+                              const dgfem::DView2& numerical_sol, const CouetteFlowAnalytic& exact,
                               double gamma, int var_idx) {
     auto space = mesh->get_dg_space();
     auto mapping = space->get_mapping();
@@ -100,15 +106,18 @@ double compute_variable_error(const std::shared_ptr<dgfem::DGMesh>& mesh,
 int main(int argc, char** argv) {
     Kokkos::ScopeGuard kokkos_guard(argc, argv);
     try {
-        std::cout << "=== DGFEM Navier-Stokes Shear Flow Example ===" << std::endl;
+        std::cout << "=== DGFEM Navier-Stokes Couette Flow Example ===" << std::endl;
 
-        // Physical parameters matching the analytic test case
+        // Physical parameters -- chosen to match shear_flow_example.cpp's mu and velocity
+        // gradient (U_wall / height = 1) so the predicted viscous-heating pressure drift is
+        // the same order, letting the two examples cross-check each other.
         constexpr double gamma = 1.4;
         constexpr double mu = 5.0e-6;
         constexpr double prandtl = 0.72;
         constexpr double penalty = 10000.0;
+        constexpr double height = 1.0;
+        constexpr double u_wall = 1.0;
 
-        // Build a modest triangular mesh over [0, 1] x [0, 1] with P1 basis
         auto mesh = dgfem::MeshSetup::create_standard_mesh(
             /*use_triangles=*/false,
             /*order=*/2,
@@ -117,32 +126,32 @@ int main(int argc, char** argv) {
             /*xmin=*/0.0,
             /*xmax=*/1.0,
             /*ymin=*/0.0,
-            /*ymax=*/1.0);
+            /*ymax=*/height);
         dgfem::MeshSetup::print_info(mesh);
 
-        ShearFlowAnalytic exact{gamma};
+        CouetteFlowAnalytic exact{gamma, u_wall, height};
 
-        // Apply shear-consistent far-field boundary conditions on all faces
-        auto shear_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
-            dgfem::BCTypeEuler::FAR_FIELD,
-            [exact](const dgfem::Vec2& x) { return exact.conserved(x); });
-        for (const auto& [name, _] : mesh->get_boundary_tags()) {
-            mesh->set_boundary_condition_euler(name, shear_bc);
-        }
-        mesh->build_precomputed_faces();
-        for (const auto& [name, _] : mesh->get_boundary_tags()) {
-            mesh->set_boundary_condition_euler(name, shear_bc);
-        }
+        // Periodic in x (the flow is homogeneous in that direction); no-slip walls in y, with
+        // the bottom wall stationary and the top wall moving at u_wall.
+        mesh->set_periodic_boundaries("Left", "Right");
+
+        auto bottom_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
+            dgfem::BCTypeEuler::NO_SLIP_WALL, dgfem::Vec4{1.0, 0.0, 0.0, 1.0});
+        auto top_bc = std::make_shared<dgfem::BoundaryConditionEuler>(
+            dgfem::BCTypeEuler::NO_SLIP_WALL, dgfem::Vec4{1.0, u_wall, 0.0, 1.0});
+        mesh->set_boundary_condition_euler("Bottom", bottom_bc);
+        mesh->set_boundary_condition_euler("Top", top_bc);
 
         // Time integration settings
         constexpr double dt = 1e-5;
         constexpr double T_final = 0.02;
         constexpr int save_every = 20;
 
-        std::cout << "\n--- Solving viscous shear flow ---" << std::endl;
+        std::cout << "\n--- Solving viscous Couette flow ---" << std::endl;
+        std::cout << "  U_wall = " << u_wall << ", height = " << height << std::endl;
         std::cout << "  dt = " << dt << ", T_final = " << T_final << std::endl;
 
-        dgfem::Timer solve_timer("Shear flow solve");
+        dgfem::Timer solve_timer("Couette flow solve");
         dgfem::NavierStokesDGSolver solver(mesh, gamma, mu, prandtl, penalty);
         auto solutions = solver.solve([exact](const dgfem::Vec2& x) { return exact.conserved(x); },
                                       T_final, dt, save_every);
@@ -171,7 +180,7 @@ int main(int argc, char** argv) {
         }
 
         for (size_t i = 0; i < solutions.size(); ++i) {
-            auto filename = (output_dir / ("shear_flow_" + std::to_string(i))).string();
+            auto filename = (output_dir / ("couette_flow_" + std::to_string(i))).string();
             dgfem::VTKWriter::write_euler_solution(mesh, solutions[i], filename, gamma,
                                                    /*refinement=*/1);
             if (i % 5 == 0 || i == solutions.size() - 1) {

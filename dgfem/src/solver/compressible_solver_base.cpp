@@ -112,7 +112,152 @@ CompressibleDGSolverBase::time_step_ssp_rk3(const StateVector& u_n, double dt) c
     std::function<StateVector(const StateVector&)> rhs_func = [this](const StateVector& u) {
         return apply_mass_inv(assemble_residual(u));
     };
-    return SSP_RK::step_rk3<StateVector>(u_n, dt, rhs_func);
+    std::function<StateVector(const StateVector&)> limiter_func = nullptr;
+    if (limiter_enabled_) {
+        limiter_func = [this](const StateVector& u) { return apply_minmod_limiter_x(u); };
+    }
+    return SSP_RK::step_rk3<StateVector>(u_n, dt, rhs_func, limiter_func);
+}
+
+void CompressibleDGSolverBase::set_limiter_enabled(bool enabled) {
+    if (enabled) {
+        auto dg_space = mesh_->get_dg_space();
+        if (mesh_->get_element_type() != "quad" || dg_space->get_basis()->get_order() != 1) {
+            throw std::invalid_argument(
+                "set_limiter_enabled(true): the minmod limiter currently only supports "
+                "order-1 quad elements; got element_type='" +
+                mesh_->get_element_type() +
+                "', order=" + std::to_string(dg_space->get_basis()->get_order()));
+        }
+        build_x_neighbor_map();
+    }
+    limiter_enabled_ = enabled;
+}
+
+void CompressibleDGSolverBase::build_x_neighbor_map() {
+    int n_elem = mesh_->get_n_elements();
+    x_left_neighbor_.assign(n_elem, -1);
+    x_right_neighbor_.assign(n_elem, -1);
+    element_dx_.assign(n_elem, 0.0);
+
+    std::vector<Vec2> centroids(n_elem);
+    for (int e = 0; e < n_elem; ++e) {
+        DView2 verts = mesh_->get_element_vertices(e);
+        int n_verts = static_cast<int>(verts.extent(0));
+        double sx = 0.0, sy = 0.0;
+        double x_min = std::numeric_limits<double>::max();
+        double x_max = std::numeric_limits<double>::lowest();
+        for (int i = 0; i < n_verts; ++i) {
+            sx += verts(i, 0);
+            sy += verts(i, 1);
+            x_min = std::min(x_min, verts(i, 0));
+            x_max = std::max(x_max, verts(i, 0));
+        }
+        centroids[e] = Vec2{sx / n_verts, sy / n_verts};
+        element_dx_[e] = x_max - x_min;
+    }
+
+    for (int e = 0; e < n_elem; ++e) {
+        for (const auto& [nbr, nbr_face] : mesh_->get_element_neighbors(e)) {
+            if (nbr < 0 || nbr == e) {
+                continue;
+            }
+            double dx = centroids[nbr][0] - centroids[e][0];
+            double dy = centroids[nbr][1] - centroids[e][1];
+            if (std::abs(dx) <= std::abs(dy)) {
+                continue;  // y-direction neighbor; irrelevant to this x-only limiter.
+            }
+            if (dx < 0.0) {
+                x_left_neighbor_[e] = nbr;
+            } else {
+                x_right_neighbor_[e] = nbr;
+            }
+        }
+    }
+}
+
+namespace {
+// Classic three-argument minmod: returns 0 unless a, b, c all share the same sign, in which
+// case it returns the smallest-magnitude one.
+double minmod3(double a, double b, double c) {
+    if (a > 0.0 && b > 0.0 && c > 0.0) {
+        return std::min({a, b, c});
+    }
+    if (a < 0.0 && b < 0.0 && c < 0.0) {
+        return std::max({a, b, c});
+    }
+    return 0.0;
+}
+}  // namespace
+
+CompressibleDGSolverBase::StateVector
+CompressibleDGSolverBase::apply_minmod_limiter_x(const StateVector& u) const {
+    int n_elem = mesh_->get_n_elements();
+    int n_vars = weak_form_->get_n_vars();
+    StateVector result(u.size());
+
+    // TVB (total-variation-bounded) threshold: Cockburn & Shu's modified minmod treats a
+    // *value difference* smaller than M*dx^2 as genuine smooth curvature rather than an
+    // incipient oscillation. Here the comparison is against slope_phys (a value difference
+    // divided by dx), so the threshold needs one fewer power of dx: M*dx, not M*dx^2 -- using
+    // dx^2 against a slope makes the threshold ~100x too small at dx=0.01 to ever matter,
+    // which is exactly why an earlier version of this code (M=50, thresholded on dx^2)
+    // produced results numerically indistinguishable from plain M=0 minmod. Plain minmod, in
+    // turn, was confirmed (via temporary instrumentation) to touch >50% of all eligible cells
+    // on every stage of the Sod problem -- clipping the whole smooth rarefaction fan, not just
+    // the genuine kinks -- which is why it made the solution *less* accurate than no limiter.
+    // M=50 is the value Cockburn & Shu use in their original RKDG papers' shock-tube examples;
+    // it is a problem-independent order-of-magnitude default, not tuned to this case.
+    constexpr double kTvbM = 50.0;
+
+    for (int e = 0; e < n_elem; ++e) {
+        int n_basis = static_cast<int>(u[e].extent(0));
+        result[e] = DView2("limited_elem", u[e].extent(0), u[e].extent(1));
+        for (int i = 0; i < n_basis; ++i) {
+            for (int v = 0; v < n_vars; ++v) {
+                result[e](i, v) = u[e](i, v);
+            }
+        }
+
+        int n_left = x_left_neighbor_[e];
+        int n_right = x_right_neighbor_[e];
+        if (n_left < 0 || n_right < 0 || n_basis < 4) {
+            // Boundary element (no interior neighbor on one side): leave unlimited rather
+            // than guess a ghost average.
+            continue;
+        }
+        double dx_e = element_dx_[e];
+        double tvb_threshold = kTvbM * dx_e;
+
+        for (int v = 0; v < n_vars; ++v) {
+            double ubar_e = u[e](0, v);
+            double ubar_left = u[n_left](0, v);
+            double ubar_right = u[n_right](0, v);
+
+            // Mode 1 of the order-1 Legendre tensor basis is the reference-space x-slope
+            // (phi_1 = xi, xi in [-1,1]); physical slope = coeff * (2/dx) for an element of
+            // physical width dx.
+            double slope_phys = u[e](1, v) * (2.0 / dx_e);
+            if (std::abs(slope_phys) <= tvb_threshold) {
+                continue;  // Within the TVB tolerance: treat as smooth curvature, don't limit.
+            }
+            double slope_fwd = (ubar_right - ubar_e) / dx_e;
+            double slope_bwd = (ubar_e - ubar_left) / dx_e;
+            double limited_slope = minmod3(slope_phys, slope_fwd, slope_bwd);
+
+            if (std::abs(limited_slope - slope_phys) > 1e-13 * (std::abs(slope_phys) + 1.0)) {
+                result[e](1, v) = limited_slope * (dx_e / 2.0);
+                // Mode 3 is exactly the xy cross term at order 1 (see LegendreBasis's tensor
+                // index order): once the linear trend itself is untrustworthy, the even
+                // higher-variation bilinear mode is discarded too (standard moment-limiter
+                // cascade). This mode-3-is-the-cross-term fact is order-1-specific -- it does
+                // not hold at higher order, which is exactly why set_limiter_enabled() rejects
+                // anything but order 1.
+                result[e](3, v) = 0.0;
+            }
+        }
+    }
+    return result;
 }
 
 double CompressibleDGSolverBase::compute_max_cfl(const StateVector& u_coeffs, double dt) const {

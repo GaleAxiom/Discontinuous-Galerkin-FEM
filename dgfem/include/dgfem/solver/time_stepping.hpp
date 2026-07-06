@@ -35,22 +35,33 @@ public:
      * @param u_n Current solution
      * @param dt Time step size
      * @param rhs_func Function computing du/dt = L(u)
+     * @param limiter_func Optional post-stage projection (e.g. a slope limiter), applied after
+     * each of the three stage updates below -- the standard "SSP-RK + limiter each stage"
+     * RKDG recipe (Cockburn & Shu 1998). Defaults to no limiting, so existing call sites are
+     * unaffected.
      * @return Solution at next time step
      */
     template <typename SolutionType>
-    static SolutionType step_rk3(const SolutionType& u_n, double dt,
-                                 std::function<SolutionType(const SolutionType&)> rhs_func) {
+    static SolutionType
+    step_rk3(const SolutionType& u_n, double dt,
+             std::function<SolutionType(const SolutionType&)> rhs_func,
+             std::function<SolutionType(const SolutionType&)> limiter_func = nullptr) {
+        auto apply_limiter = [&](const SolutionType& u) {
+            return limiter_func ? limiter_func(u) : u;
+        };
+
         // Stage 1
         SolutionType k1 = rhs_func(u_n);
-        SolutionType u1 = add_scaled(u_n, dt, k1);
+        SolutionType u1 = apply_limiter(add_scaled(u_n, dt, k1));
 
         // Stage 2
         SolutionType k2 = rhs_func(u1);
-        SolutionType u2 = add_scaled(scale(0.75, u_n), 0.25, add_scaled(u1, dt, k2));
+        SolutionType u2 = apply_limiter(add_scaled(scale(0.75, u_n), 0.25, add_scaled(u1, dt, k2)));
 
         // Stage 3
         SolutionType k3 = rhs_func(u2);
-        SolutionType u_np1 = add_scaled(scale(1.0 / 3.0, u_n), 2.0 / 3.0, add_scaled(u2, dt, k3));
+        SolutionType u_np1 =
+            apply_limiter(add_scaled(scale(1.0 / 3.0, u_n), 2.0 / 3.0, add_scaled(u2, dt, k3)));
 
         return u_np1;
     }

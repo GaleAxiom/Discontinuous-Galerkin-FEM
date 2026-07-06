@@ -242,6 +242,19 @@ public:
      */
     [[nodiscard]] bool has_diverged() const noexcept { return diverged_; }
 
+    /**
+     * @brief Enable/disable the minmod (TVB) slope limiter, applied after every RK stage.
+     *
+     * Scoped narrowly on purpose: it only supports order-1 quad elements (the Legendre
+     * tensor basis's mode 1 is exactly the x-linear coefficient and mode 3 is exactly the xy
+     * cross term at that order -- see apply_minmod_limiter_x()'s doc comment for why this
+     * doesn't generalize to other orders without more work) and limits in x only. That's
+     * enough for a quasi-1D shock-tube-style problem; a general 2D/any-order limiter is a
+     * separate, larger undertaking. Throws std::invalid_argument if the mesh/basis don't
+     * match when enabling.
+     */
+    void set_limiter_enabled(bool enabled);
+
 protected:
     CompressibleDGSolverBase(std::shared_ptr<DGMesh> mesh,
                              std::shared_ptr<EulerWeakFormulation> weak_form,
@@ -267,6 +280,14 @@ private:
     std::string solver_label_;
     mutable StateVector residual_buffer_;
     bool diverged_{false};
+
+    bool limiter_enabled_{false};
+    std::vector<int> x_left_neighbor_;
+    std::vector<int> x_right_neighbor_;
+    std::vector<double> element_dx_;
+
+    void build_x_neighbor_map();
+    [[nodiscard]] StateVector apply_minmod_limiter_x(const StateVector& u) const;
 
     [[nodiscard]] std::vector<DView2> flatten_frames(const std::vector<StateVector>& frames) const;
 };

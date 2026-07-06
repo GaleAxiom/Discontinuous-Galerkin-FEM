@@ -20,6 +20,22 @@ target_link_libraries(advection_solver_test dgfem)
 add_executable(high_order_test high_order_test.cpp)
 target_link_libraries(high_order_test dgfem)
 
-# Archived examples (euler_vortex_test, shear_flow_example, taylor_green_test,
-# acoustic_wave_test, von_karman_vortices_example) live under examples/archive/
-# and are intentionally not built.
+# Acoustic wave propagation test (dispersion/dissipation analysis for the Euler solver)
+add_executable(acoustic_wave_test archive/acoustic_wave_test.cpp)
+target_link_libraries(acoustic_wave_test dgfem)
+
+# Viscous shear flow example (Navier-Stokes solver against an analytic steady profile)
+add_executable(shear_flow_example archive/shear_flow_example.cpp)
+target_link_libraries(shear_flow_example dgfem)
+
+# Viscous Couette flow example (no-slip wall BCs instead of far-field ghost states)
+add_executable(couette_flow_example couette_flow_example.cpp)
+target_link_libraries(couette_flow_example dgfem)
+
+# Sod shock tube (inviscid Euler against the exact Riemann solution; robustness check for
+# the lack of a shock-capturing limiter)
+add_executable(sod_shock_tube_example sod_shock_tube_example.cpp)
+target_link_libraries(sod_shock_tube_example dgfem)
+
+# Remaining archived examples (euler_vortex_test, taylor_green_test,
+# von_karman_vortices_example) live under examples/archive/ and are intentionally not built.
