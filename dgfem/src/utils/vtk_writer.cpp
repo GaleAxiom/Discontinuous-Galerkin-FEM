@@ -18,12 +18,60 @@
 
 namespace dgfem {
 
+void VTKWriter::write_vtk_file(std::shared_ptr<DGMesh> mesh, const DView2& vis_vertices,
+                               const IView2& vis_connectivity,
+                               const std::vector<std::pair<std::string, DView1>>& data_arrays,
+                               const std::string& filename, const std::string& title) {
+    std::ofstream file(filename + ".vtk");
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open file: " + filename + ".vtk");
+    }
+
+    write_vtk_header(file, title);
+    write_vtk_points(file, vis_vertices);
+    write_vtk_cells(file, vis_connectivity, mesh->get_element_type());
+    write_vtk_point_data(file, data_arrays);
+
+    file.close();
+    std::cout << "  VTK file written successfully!" << std::endl;
+}
+
+// Shared core behind every writer that just visualizes raw per-DOF fields (i.e. everything
+// except write_euler_solution's derived primitive/Mach/temperature quantities): generates
+// the visualization submesh -- exactly the same generate_visualization_mesh/evaluate_at_points
+// pair write_euler_solution itself uses, so every writer is built on the same mechanism that
+// already handles both element types and any order correctly -- then evaluates each named
+// raw field at those points and writes the file.
+void VTKWriter::write_point_data_fields(std::shared_ptr<DGMesh> mesh,
+                                       const std::vector<std::pair<std::string, DView1>>& raw_fields,
+                                       const std::string& filename, const std::string& title,
+                                       int resolution_factor) {
+    std::cout << "Writing VTK file: " << filename << ".vtk" << std::endl;
+    std::cout << "  Elements: " << mesh->get_n_elements() << std::endl;
+    std::cout << "  Resolution factor: " << resolution_factor << std::endl;
+
+    DView2 vis_vertices;
+    IView2 vis_connectivity;
+    generate_visualization_mesh(mesh, resolution_factor, vis_vertices, vis_connectivity);
+
+    std::cout << "  Visualization points: " << vis_vertices.extent(0) << std::endl;
+    std::cout << "  Visualization cells: " << vis_connectivity.extent(0) << std::endl;
+
+    std::vector<std::pair<std::string, DView1>> data_arrays;
+    data_arrays.reserve(raw_fields.size());
+    for (const auto& [name, raw] : raw_fields) {
+        data_arrays.push_back(
+            {name, evaluate_at_points(mesh, raw, vis_vertices, resolution_factor)});
+    }
+
+    write_vtk_file(mesh, vis_vertices, vis_connectivity, data_arrays, filename, title);
+}
+
 void VTKWriter::write_solution(std::shared_ptr<DGMesh> mesh, const DView1& solution,
                                const std::string& filename, const std::string& variable_name,
                                int resolution_factor) {
-    std::vector<DView1> solutions = {solution};
-    std::vector<std::string> names = {variable_name};
-    write_multi_variable_solution(mesh, solutions, names, filename, resolution_factor);
+    write_point_data_fields(mesh, {{variable_name, solution}}, filename, "DGFEM Solution",
+                            resolution_factor);
 }
 
 void VTKWriter::write_multi_variable_solution(std::shared_ptr<DGMesh> mesh,
@@ -33,52 +81,74 @@ void VTKWriter::write_multi_variable_solution(std::shared_ptr<DGMesh> mesh,
     if (solutions.size() != variable_names.size()) {
         throw std::runtime_error("Number of solutions must match number of variable names");
     }
-
-    std::cout << "Writing VTK file: " << filename << ".vtk" << std::endl;
-    std::cout << "  Elements: " << mesh->get_n_elements() << std::endl;
-    std::cout << "  Resolution factor: " << resolution_factor << std::endl;
-
-    // Generate visualization mesh
-    DView2 vis_vertices;
-    IView2 vis_connectivity;
-    generate_visualization_mesh(mesh, resolution_factor, vis_vertices, vis_connectivity);
-
-    std::cout << "  Visualization points: " << vis_vertices.extent(0) << std::endl;
-    std::cout << "  Visualization cells: " << vis_connectivity.extent(0) << std::endl;
-
-    // Evaluate solutions at visualization points
-    std::vector<std::pair<std::string, DView1>> data_arrays;
+    std::vector<std::pair<std::string, DView1>> raw_fields;
+    raw_fields.reserve(solutions.size());
     for (size_t i = 0; i < solutions.size(); ++i) {
-        DView1 values = evaluate_at_points(mesh, solutions[i], vis_vertices, resolution_factor);
-        data_arrays.push_back({variable_names[i], values});
+        raw_fields.push_back({variable_names[i], solutions[i]});
+    }
+    write_point_data_fields(mesh, raw_fields, filename, "DGFEM Solution", resolution_factor);
+}
+
+void VTKWriter::write_advection_solution(std::shared_ptr<DGMesh> mesh, const DView1& solution,
+                                         const std::string& filename, int resolution_factor,
+                                         int n_vars) {
+    if (n_vars != 1) {
+        throw std::invalid_argument(
+            "write_advection_solution: expects a single scalar field (n_vars == 1); got "
+            "n_vars=" +
+            std::to_string(n_vars) + ". Use write_flat_matrix_solution for multi-variable "
+                                     "flat-matrix solutions.");
+    }
+    write_point_data_fields(mesh, {{"phi", solution}}, filename, "DGFEM Advection Solution",
+                            resolution_factor);
+}
+
+void VTKWriter::write_flat_matrix_solution(std::shared_ptr<DGMesh> mesh,
+                                           const DView2& solution_matrix,
+                                           const std::vector<std::string>& field_names,
+                                           const std::string& filename, int resolution_factor) {
+    int n_vars = static_cast<int>(field_names.size());
+    int n_elem = mesh->get_n_elements();
+    int n_basis = mesh->get_dg_space()->get_basis()->get_n_basis();
+
+    std::vector<DView1> raw_fields(n_vars);
+    for (int v = 0; v < n_vars; ++v) {
+        raw_fields[v] = DView1("raw_field", n_elem * n_basis);
+    }
+    for (int e = 0; e < n_elem; ++e) {
+        for (int i = 0; i < n_basis; ++i) {
+            for (int v = 0; v < n_vars; ++v) {
+                raw_fields[v](e * n_basis + i) = solution_matrix(e, i * n_vars + v);
+            }
+        }
     }
 
-    // Write to file
-    std::ofstream file(filename + ".vtk");
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file: " + filename + ".vtk");
+    std::vector<std::pair<std::string, DView1>> named_fields;
+    named_fields.reserve(n_vars);
+    for (int v = 0; v < n_vars; ++v) {
+        named_fields.push_back({field_names[v], raw_fields[v]});
     }
-
-    write_vtk_header(file);
-    write_vtk_points(file, vis_vertices);
-    write_vtk_cells(file, vis_connectivity, mesh->get_element_type());
-    write_vtk_point_data(file, data_arrays);
-
-    file.close();
-    std::cout << "  VTK file written successfully!" << std::endl;
+    write_point_data_fields(mesh, named_fields, filename, "DGFEM Solution", resolution_factor);
 }
 
 void VTKWriter::write_euler_solution(std::shared_ptr<DGMesh> mesh, const DView2& solution_matrix,
                                      const std::string& filename, double gamma,
-                                     int resolution_factor) {
+                                     int resolution_factor, int n_vars) {
+    if (n_vars != 4) {
+        throw std::invalid_argument(
+            "write_euler_solution requires n_vars == 4 (rho, rho*u, rho*v, E) since the "
+            "derived pressure/temperature/Mach fields below are only meaningful for the "
+            "Euler/Navier-Stokes conserved-variable system; got n_vars=" +
+            std::to_string(n_vars) +
+            ". For a different variable count, use write_flat_matrix_solution instead.");
+    }
+
     std::cout << "Writing Euler solution to VTK file: " << filename << ".vtk" << std::endl;
     std::cout << "  Elements: " << mesh->get_n_elements() << std::endl;
     std::cout << "  Resolution factor: " << resolution_factor << std::endl;
 
     int n_elem = mesh->get_n_elements();
     int n_basis = mesh->get_dg_space()->get_basis()->get_n_basis();
-    int n_vars = 4;
-    int n_dofs_per_elem = n_basis * n_vars;
 
     // Convert flat solution matrix to separate vectors for each conserved variable
     std::vector<DView1> conserved_vars(n_vars);
@@ -95,7 +165,7 @@ void VTKWriter::write_euler_solution(std::shared_ptr<DGMesh> mesh, const DView2&
         }
     }
 
-    // Generate visualization mesh
+    // Generate visualization mesh -- the same shared mechanism write_point_data_fields uses.
     DView2 vis_vertices;
     IView2 vis_connectivity;
     generate_visualization_mesh(mesh, resolution_factor, vis_vertices, vis_connectivity);
@@ -157,18 +227,8 @@ void VTKWriter::write_euler_solution(std::shared_ptr<DGMesh> mesh, const DView2&
                                                                {"rho_v", conserved_at_points[2]},
                                                                {"E", conserved_at_points[3]}};
 
-    // Write to file
-    std::ofstream file(filename + ".vtk");
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file: " + filename + ".vtk");
-    }
-
-    write_vtk_header(file, "DGFEM Euler Solution");
-    write_vtk_points(file, vis_vertices);
-    write_vtk_cells(file, vis_connectivity, mesh->get_element_type());
-    write_vtk_point_data(file, data_arrays);
-
-    file.close();
+    write_vtk_file(mesh, vis_vertices, vis_connectivity, data_arrays, filename,
+                  "DGFEM Euler Solution");
     std::cout << "  Euler VTK file written successfully!" << std::endl;
 }
 
@@ -210,23 +270,10 @@ void VTKWriter::write_with_analytical(std::shared_ptr<DGMesh> mesh, const DView1
         error(i) = std::abs(numerical_values(i) - analytical_values(i));
     }
 
-    // Write to file
-    std::ofstream file(filename + ".vtk");
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file: " + filename + ".vtk");
-    }
-
-    write_vtk_header(file, "DGFEM Solution with Analytical Comparison");
-    write_vtk_points(file, vis_vertices);
-    write_vtk_cells(file, vis_connectivity, mesh->get_element_type());
-
     std::vector<std::pair<std::string, DView1>> data_arrays = {
         {"numerical", numerical_values}, {"analytical", analytical_values}, {"error", error}};
-    write_vtk_point_data(file, data_arrays);
-
-    file.close();
-    std::cout << "VTK file with analytical comparison written to: " << filename << ".vtk"
-              << std::endl;
+    write_vtk_file(mesh, vis_vertices, vis_connectivity, data_arrays, filename,
+                  "DGFEM Solution with Analytical Comparison");
 }
 
 void VTKWriter::generate_visualization_mesh(std::shared_ptr<DGMesh> mesh, int resolution_factor,

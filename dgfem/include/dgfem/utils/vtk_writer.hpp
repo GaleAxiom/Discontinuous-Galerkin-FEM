@@ -69,6 +69,10 @@ public:
      * @param filename Output filename (without extension)
      * @param gamma Ratio of specific heats (default: 1.4)
      * @param resolution_factor Subdivision factor for visualization
+     * @param n_vars Number of conserved variables per basis function; must be exactly 4
+     * (rho, rho*u, rho*v, E) since the derived primitive/Mach/temperature fields below are
+     * only meaningful for that system. Throws std::invalid_argument otherwise -- for a
+     * flat-matrix solution with a different variable count, use write_flat_matrix_solution.
      *
      * Exports both conserved and primitive variables:
      * - Conserved: rho, rho*u, rho*v, E
@@ -76,7 +80,42 @@ public:
      */
     static void write_euler_solution(std::shared_ptr<DGMesh> mesh, const DView2& solution_matrix,
                                      const std::string& filename, double gamma = 1.4,
-                                     int resolution_factor = 3);
+                                     int resolution_factor = 3, int n_vars = 4);
+
+    /**
+     * @brief Write a flat-matrix solution (n_elem x (n_basis * n_vars)) with arbitrary
+     * n_vars, writing each variable as a raw named field (no derived quantities).
+     *
+     * Shares the same visualization/evaluation core as write_euler_solution, but without
+     * that function's hardcoded assumption of exactly 4 Euler conserved variables -- use
+     * this for other multi-variable flat-matrix solvers.
+     *
+     * @param mesh The DG mesh
+     * @param solution_matrix Solution in flat format (n_elem x (n_basis * n_vars))
+     * @param field_names Name for each of the n_vars fields (size determines n_vars)
+     * @param filename Output filename (without extension)
+     * @param resolution_factor Subdivision factor for visualization
+     */
+    static void write_flat_matrix_solution(std::shared_ptr<DGMesh> mesh,
+                                           const DView2& solution_matrix,
+                                           const std::vector<std::string>& field_names,
+                                           const std::string& filename, int resolution_factor = 3);
+
+    /**
+     * @brief Write a scalar advection/transport solution to VTK file.
+     *
+     * Thin wrapper around the same shared core as write_solution -- separately named so
+     * call sites read clearly, and scoped to n_vars == 1 (throws otherwise).
+     *
+     * @param mesh The DG mesh
+     * @param solution DG solution coefficients (length n_elem * n_basis)
+     * @param filename Output filename (without extension)
+     * @param resolution_factor Subdivision factor for visualization
+     * @param n_vars Must be 1; kept as a parameter so call sites can be explicit about it.
+     */
+    static void write_advection_solution(std::shared_ptr<DGMesh> mesh, const DView1& solution,
+                                         const std::string& filename, int resolution_factor = 3,
+                                         int n_vars = 1);
 
     /**
      * @brief Write mesh only (no solution data) to VTK file
@@ -102,6 +141,31 @@ public:
                                       const std::string& filename, int resolution_factor = 3);
 
 private:
+    /**
+     * @brief Shared core behind write_solution / write_multi_variable_solution /
+     * write_advection_solution / write_flat_matrix_solution: generates the visualization
+     * submesh once, evaluates each raw per-DOF field at those points, and writes the file.
+     * Deliberately n_vars-agnostic (just iterates raw_fields) -- the bug that crashed the
+     * advection example was write_euler_solution hardcoding exactly 4 fields regardless of
+     * the n_vars it was actually called with; every non-Euler-specific writer routes
+     * through this one path instead so that bug class can't recur.
+     *
+     * @param raw_fields Name/raw-DOF-array pairs; each array has length n_elem * n_basis
+     */
+    static void write_point_data_fields(std::shared_ptr<DGMesh> mesh,
+                                        const std::vector<std::pair<std::string, DView1>>& raw_fields,
+                                        const std::string& filename, const std::string& title,
+                                        int resolution_factor);
+
+    /**
+     * @brief Shared file-writing tail: header + points + cells + point data, given an
+     * already-generated visualization submesh and already-evaluated data arrays.
+     */
+    static void write_vtk_file(std::shared_ptr<DGMesh> mesh, const DView2& vis_vertices,
+                               const IView2& vis_connectivity,
+                               const std::vector<std::pair<std::string, DView1>>& data_arrays,
+                               const std::string& filename, const std::string& title);
+
     /**
      * @brief Generate high-resolution visualization points and connectivity
      *

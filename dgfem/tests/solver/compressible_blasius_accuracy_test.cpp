@@ -247,7 +247,7 @@ TEST_F(NavierStokesBlasiusAccuracyTest, MaintainsCompressibleBlasiusProfile) {
                   << "': " << ec.message() << '\n';
     } else {
         const std::filesystem::path vtk_base = output_dir / "compressible_blasius_profile";
-        VTKWriter::write_euler_solution(mesh, final_frame, vtk_base.string(), gamma, 4);
+        VTKWriter::write_euler_solution(mesh, final_frame, vtk_base.string(), gamma, 4, /*n_vars=*/4);
     }
 
     std::array<double, 4> errors{};

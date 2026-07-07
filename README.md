@@ -14,6 +14,12 @@ A high-performance C++20 implementation of the Discontinuous Galerkin Finite Ele
 - **Flexible quadrature rules**: Gauss-Legendre integration on triangles and quadrilaterals
 - **Time-stepping schemes**: Explicit Runge-Kutta methods for time-dependent problems
 - **Geometric mappings**: Support for curved and affine element transformations
+- **Shock capturing** (order-1 quad, x-direction, opt-in): pluggable
+  `TroubledCellIndicator`/`ReconstructionTechnique` strategy classes on
+  `CompressibleDGSolverBase`, defaulting to a Persson-Peraire troubled-cell indicator + WENO
+  reconstruction (see `dgfem/include/dgfem/solver/dg_solver.hpp`'s `set_limiter_enabled()` doc
+  for what this measurably does and doesn't buy you -- it's a robustness tool for hard problems,
+  not a free accuracy win on easy ones)
 
 ### Supported Equations
 - **Advection equation** (scalar transport)
@@ -86,6 +92,8 @@ The `dgfem/examples/` directory contains several demonstration programs:
 
 - **`convergence_test.cpp`** - Convergence rate verification
 - **`high_order_test.cpp`** - High-order (p > 3) accuracy demonstration
+- **`sod_shock_tube_example.cpp`** - Sod shock tube vs. the exact Riemann solution, comparing
+  unlimited / old always-on minmod / the default Persson-Peraire+WENO shock-capturing limiter
 
 `dgfem/examples/archive/` also contains Euler/Navier-Stokes examples (isentropic vortex,
 Taylor-Green vortex, shear layer, acoustic wave, von Karman vortex street) from earlier in the
@@ -187,6 +195,8 @@ The Discontinuous Galerkin method combines features of finite element and finite
 1. Cockburn, B., & Shu, C. W. (1998). *The Runge-Kutta discontinuous Galerkin method for conservation laws*
 2. Hesthaven, J. S., & Warburton, T. (2008). *Nodal Discontinuous Galerkin Methods*
 3. Kopriva, D. A. (2009). *Implementing Spectral Methods for PDEs*
+4. Persson, P.-O., & Peraire, J. (2006). *Sub-cell shock capturing for discontinuous Galerkin methods* (the troubled-cell indicator used by the default shock-capturing limiter)
+5. Qiu, J., & Shu, C.-W. (2005). *Runge-Kutta discontinuous Galerkin method using WENO limiters* (the reconstruction technique used by the default shock-capturing limiter)
 
 ## 🤝 Contributing
 

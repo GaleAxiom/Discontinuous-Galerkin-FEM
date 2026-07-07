@@ -58,8 +58,8 @@ int main(int argc, char** argv) {
         const double gamma = 1.4;  // Ratio of specific heats
         const double beta = 5.0 / (2.0 * M_PI * std::sqrt(gamma)) * std::exp(0.5);
 
-        // Create mesh using helper (triangles, order 3, spacing 0.1, 4 variables)
-        auto mesh = dgfem::MeshSetup::create_standard_mesh(true, 3, 0.1, 4, -5.0, 5.0, -5.0, 5.0);
+        // Create mesh using helper (triangles, order 3, spacing 0.2, 4 variables)
+        auto mesh = dgfem::MeshSetup::create_standard_mesh(true, 3, 0.2, 4, -5.0, 5.0, -5.0, 5.0);
         dgfem::MeshSetup::print_info(mesh);
 
         // Set periodic boundaries for stationary vortex
@@ -67,9 +67,11 @@ int main(int argc, char** argv) {
         mesh->set_periodic_boundaries("Bottom", "Top");
         std::cout << "  Boundary conditions: PERIODIC on all sides" << std::endl;
 
-        // Time stepping parameters
+        // Time stepping parameters -- scaled down from the original T_final=100 (40000 steps
+        // on a 0.1-spacing mesh) for a quick sanity/visualization run rather than a long-time
+        // drift study; still several vortex advection times given the O(1) vortex core size.
         const double dt = 0.0025;
-        const double T_final = 100.0;
+        const double T_final = 5.0;
         const int save_every = 100;
 
         std::cout << "\n--- Time Stepping ---" << std::endl;
@@ -88,7 +90,7 @@ int main(int argc, char** argv) {
         std::cout << "\n--- Exporting " << solutions.size() << " frames to VTK ---" << std::endl;
         for (size_t i = 0; i < solutions.size(); ++i) {
             dgfem::VTKWriter::write_euler_solution(
-                mesh, solutions[i], "output/euler_vortex_" + std::to_string(i), gamma, 2);
+                mesh, solutions[i], "output/euler_vortex_" + std::to_string(i), gamma, 2, /*n_vars=*/4);
             if (i % 5 == 0 || i == solutions.size() - 1)
                 std::cout << "  Frame " << i << "/" << solutions.size() - 1 << std::endl;
         }

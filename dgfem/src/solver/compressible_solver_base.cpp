@@ -1,6 +1,9 @@
 #include "dgfem/reference/mapping.hpp"
 #include "dgfem/solver/dg_solver.hpp"
+#include "dgfem/solver/euler_eigensystem.hpp"
+#include "dgfem/solver/persson_peraire_indicator.hpp"
 #include "dgfem/solver/time_stepping.hpp"
+#include "dgfem/solver/weno_reconstruction.hpp"
 
 #include <cmath>
 
@@ -114,7 +117,13 @@ CompressibleDGSolverBase::time_step_ssp_rk3(const StateVector& u_n, double dt) c
     };
     std::function<StateVector(const StateVector&)> limiter_func = nullptr;
     if (limiter_enabled_) {
-        limiter_func = [this](const StateVector& u) { return apply_minmod_limiter_x(u); };
+        limiter_func = [this](const StateVector& u) {
+            int n_vars = weak_form_->get_n_vars();
+            auto troubled = troubled_cell_indicator_->detect_troubled_cells(
+                u, neighbor_connectivity_, element_dx_, n_vars, gamma_);
+            return reconstruction_technique_->apply(u, troubled, neighbor_connectivity_,
+                                                    element_dx_, n_vars, gamma_);
+        };
     }
     return SSP_RK::step_rk3<StateVector>(u_n, dt, rhs_func, limiter_func);
 }
@@ -129,217 +138,29 @@ void CompressibleDGSolverBase::set_limiter_enabled(bool enabled) {
                 mesh_->get_element_type() +
                 "', order=" + std::to_string(dg_space->get_basis()->get_order()));
         }
-        build_x_neighbor_map();
+        build_neighbor_connectivity();
+        if (!troubled_cell_indicator_ || !reconstruction_technique_) {
+            int n_vars = weak_form_->get_n_vars();
+            troubled_cell_indicator_ = std::make_shared<PerssonPeraireIndicator>(
+                std::make_shared<EulerXDirectionEigensystem>(n_vars));
+            reconstruction_technique_ = std::make_shared<WenoReconstruction>(
+                std::make_shared<EulerXDirectionEigensystem>(n_vars));
+        }
     }
     limiter_enabled_ = enabled;
 }
 
-void CompressibleDGSolverBase::build_x_neighbor_map() {
-    int n_elem = mesh_->get_n_elements();
-    x_left_neighbor_.assign(n_elem, -1);
-    x_right_neighbor_.assign(n_elem, -1);
-    element_dx_.assign(n_elem, 0.0);
-
-    std::vector<Vec2> centroids(n_elem);
-    for (int e = 0; e < n_elem; ++e) {
-        DView2 verts = mesh_->get_element_vertices(e);
-        int n_verts = static_cast<int>(verts.extent(0));
-        double sx = 0.0, sy = 0.0;
-        double x_min = std::numeric_limits<double>::max();
-        double x_max = std::numeric_limits<double>::lowest();
-        for (int i = 0; i < n_verts; ++i) {
-            sx += verts(i, 0);
-            sy += verts(i, 1);
-            x_min = std::min(x_min, verts(i, 0));
-            x_max = std::max(x_max, verts(i, 0));
-        }
-        centroids[e] = Vec2{sx / n_verts, sy / n_verts};
-        element_dx_[e] = x_max - x_min;
-    }
-
-    for (int e = 0; e < n_elem; ++e) {
-        for (const auto& [nbr, nbr_face] : mesh_->get_element_neighbors(e)) {
-            if (nbr < 0 || nbr == e) {
-                continue;
-            }
-            double dx = centroids[nbr][0] - centroids[e][0];
-            double dy = centroids[nbr][1] - centroids[e][1];
-            if (std::abs(dx) <= std::abs(dy)) {
-                continue;  // y-direction neighbor; irrelevant to this x-only limiter.
-            }
-            if (dx < 0.0) {
-                x_left_neighbor_[e] = nbr;
-            } else {
-                x_right_neighbor_[e] = nbr;
-            }
-        }
-    }
+void CompressibleDGSolverBase::set_reconstruction_technique(
+    std::shared_ptr<TroubledCellIndicator> indicator,
+    std::shared_ptr<ReconstructionTechnique> technique) {
+    troubled_cell_indicator_ = std::move(indicator);
+    reconstruction_technique_ = std::move(technique);
 }
 
-namespace {
-// Classic three-argument minmod: returns 0 unless a, b, c all share the same sign, in which
-// case it returns the smallest-magnitude one.
-double minmod3(double a, double b, double c) {
-    if (a > 0.0 && b > 0.0 && c > 0.0) {
-        return std::min({a, b, c});
-    }
-    if (a < 0.0 && b < 0.0 && c < 0.0) {
-        return std::max({a, b, c});
-    }
-    return 0.0;
-}
-
-// Right/left eigenvector matrices of the 1D Euler flux Jacobian (x-direction), acting on the
-// 3-field subsystem (rho, rho*u, E) -- the transverse momentum rho*v is not part of this
-// system and is limited separately as a passively-advected scalar. R's columns and L's rows
-// correspond to the fields (u-c, u, u+c) in that order; L = R^-1 (verified numerically, not
-// just algebraically, against a hand-picked non-trivial state before use: max|L*R-I| ~1e-16).
-// Standard closed form, e.g. Toro, "Riemann Solvers and Numerical Methods for Fluid
-// Dynamics", eq. 3.79-3.82.
-struct EulerEigensystem3 {
-    std::array<std::array<double, 3>, 3> R;  // R[conserved_index][field]
-    std::array<std::array<double, 3>, 3> L;  // L[field][conserved_index]
-};
-
-EulerEigensystem3 build_eigensystem_3(double rho, double u, double p, double gamma) {
-    double rho_safe = std::max(rho, 1e-12);
-    double c = std::sqrt(std::max(gamma * p / rho_safe, 1e-24));
-    double H = c * c / (gamma - 1.0) + 0.5 * u * u;
-
-    EulerEigensystem3 es;
-    es.R[0] = {1.0, 1.0, 1.0};
-    es.R[1] = {u - c, u, u + c};
-    es.R[2] = {H - u * c, 0.5 * u * u, H + u * c};
-
-    double b1 = (gamma - 1.0) / (c * c);
-    double b2 = 0.5 * b1 * u * u;
-    es.L[0] = {(b2 + u / c) / 2.0, -(b1 * u + 1.0 / c) / 2.0, b1 / 2.0};
-    es.L[1] = {1.0 - b2, b1 * u, -b1};
-    es.L[2] = {(b2 - u / c) / 2.0, -(b1 * u - 1.0 / c) / 2.0, b1 / 2.0};
-    return es;
-}
-}  // namespace
-
-CompressibleDGSolverBase::StateVector
-CompressibleDGSolverBase::apply_minmod_limiter_x(const StateVector& u) const {
-    int n_elem = mesh_->get_n_elements();
-    int n_vars = weak_form_->get_n_vars();
-    StateVector result(u.size());
-
-    // TVB (total-variation-bounded) threshold: Cockburn & Shu's modified minmod treats a
-    // *value difference* smaller than M*dx^2 as genuine smooth curvature rather than an
-    // incipient oscillation. The comparison here is against a slope (a value difference
-    // divided by dx), so the threshold needs one fewer power of dx: M*dx, not M*dx^2. M=50 is
-    // the value Cockburn & Shu use in their original RKDG papers' shock-tube examples; it is a
-    // problem-independent order-of-magnitude default, not tuned to this case.
-    constexpr double kTvbM = 50.0;
-
-    // Component-wise (each conserved variable limited independently) was tried first and
-    // measured to make the Sod shock tube *less* accurate than no limiter at all: limiting
-    // rho and rho*u independently doesn't preserve their ratio, so the derived primitive
-    // velocity u = (rho*u)/rho can swing more after limiting than before, especially where
-    // rho is small (see rho_R=0.125 in the Sod example). Limiting in the local characteristic
-    // fields of the 1D Euler system (rho, rho*u, E) instead couples the three so that a
-    // limited state stays a physically consistent combination of the local wave structure.
-    // rho*v has no characteristic field of its own in this quasi-1D system (see
-    // build_eigensystem_3's doc comment) and is limited componentwise as before.
-    constexpr int kRhoIdx = 0, kRhoUIdx = 1, kRhoVIdx = 2, kEIdx = 3;
-
-    for (int e = 0; e < n_elem; ++e) {
-        int n_basis = static_cast<int>(u[e].extent(0));
-        result[e] = DView2("limited_elem", u[e].extent(0), u[e].extent(1));
-        for (int i = 0; i < n_basis; ++i) {
-            for (int v = 0; v < n_vars; ++v) {
-                result[e](i, v) = u[e](i, v);
-            }
-        }
-
-        int n_left = x_left_neighbor_[e];
-        int n_right = x_right_neighbor_[e];
-        if (n_left < 0 || n_right < 0 || n_basis < 4 || n_vars != 4) {
-            // Boundary element (no interior neighbor on one side): leave unlimited rather
-            // than guess a ghost average. n_vars != 4 would mean this isn't the 4-variable
-            // Euler/NS system the eigendecomposition below assumes.
-            continue;
-        }
-        double dx_e = element_dx_[e];
-        double tvb_threshold = kTvbM * dx_e;
-
-        // rho*v: componentwise TVB minmod, same as before.
-        {
-            double ubar_e = u[e](0, kRhoVIdx);
-            double ubar_left = u[n_left](0, kRhoVIdx);
-            double ubar_right = u[n_right](0, kRhoVIdx);
-            double slope_phys = u[e](1, kRhoVIdx) * (2.0 / dx_e);
-            if (std::abs(slope_phys) > tvb_threshold) {
-                double slope_fwd = (ubar_right - ubar_e) / dx_e;
-                double slope_bwd = (ubar_e - ubar_left) / dx_e;
-                double limited_slope = minmod3(slope_phys, slope_fwd, slope_bwd);
-                if (std::abs(limited_slope - slope_phys) > 1e-13 * (std::abs(slope_phys) + 1.0)) {
-                    result[e](1, kRhoVIdx) = limited_slope * (dx_e / 2.0);
-                    result[e](3, kRhoVIdx) = 0.0;
-                }
-            }
-        }
-
-        // rho, rho*u, E: characteristic-variable limiting. Eigensystem built from this
-        // element's own cell-average primitive state (a simplification relative to a full
-        // Roe average between L/e/R, adequate for the order-of-magnitude comparison this
-        // limiter exists for).
-        Vec4 cons_bar{u[e](0, kRhoIdx), u[e](0, kRhoUIdx), u[e](0, kRhoVIdx), u[e](0, kEIdx)};
-        Vec4 prim_bar = conserved_to_primitive(cons_bar, gamma_);
-        EulerEigensystem3 es = build_eigensystem_3(prim_bar[0], prim_bar[1], prim_bar[3], gamma_);
-
-        std::array<int, 3> idx3{kRhoIdx, kRhoUIdx, kEIdx};
-        std::array<double, 3> slope_phys3{}, slope_fwd3{}, slope_bwd3{};
-        for (int k = 0; k < 3; ++k) {
-            int v = idx3[k];
-            slope_phys3[k] = u[e](1, v) * (2.0 / dx_e);
-            slope_fwd3[k] = (u[n_right](0, v) - u[e](0, v)) / dx_e;
-            slope_bwd3[k] = (u[e](0, v) - u[n_left](0, v)) / dx_e;
-        }
-
-        // Project the three candidate (conserved) slopes into characteristic space.
-        std::array<double, 3> char_phys{}, char_fwd{}, char_bwd{}, char_limited{};
-        for (int k = 0; k < 3; ++k) {
-            char_phys[k] = es.L[k][0] * slope_phys3[0] + es.L[k][1] * slope_phys3[1] +
-                           es.L[k][2] * slope_phys3[2];
-            char_fwd[k] = es.L[k][0] * slope_fwd3[0] + es.L[k][1] * slope_fwd3[1] +
-                          es.L[k][2] * slope_fwd3[2];
-            char_bwd[k] = es.L[k][0] * slope_bwd3[0] + es.L[k][1] * slope_bwd3[1] +
-                          es.L[k][2] * slope_bwd3[2];
-        }
-
-        bool any_limited = false;
-        for (int k = 0; k < 3; ++k) {
-            if (std::abs(char_phys[k]) <= tvb_threshold) {
-                char_limited[k] = char_phys[k];
-                continue;
-            }
-            char_limited[k] = minmod3(char_phys[k], char_fwd[k], char_bwd[k]);
-            if (std::abs(char_limited[k] - char_phys[k]) > 1e-13 * (std::abs(char_phys[k]) + 1.0)) {
-                any_limited = true;
-            }
-        }
-
-        if (any_limited) {
-            for (int k = 0; k < 3; ++k) {
-                int v = idx3[k];
-                double limited_slope_v = es.R[k][0] * char_limited[0] +
-                                         es.R[k][1] * char_limited[1] +
-                                         es.R[k][2] * char_limited[2];
-                result[e](1, v) = limited_slope_v * (dx_e / 2.0);
-                // Mode 3 is exactly the xy cross term at order 1 (see LegendreBasis's tensor
-                // index order): once the linear trend itself is untrustworthy, the even
-                // higher-variation bilinear mode is discarded too (standard moment-limiter
-                // cascade). This mode-3-is-the-cross-term fact is order-1-specific -- it does
-                // not hold at higher order, which is exactly why set_limiter_enabled() rejects
-                // anything but order 1.
-                result[e](3, v) = 0.0;
-            }
-        }
-    }
-    return result;
+void CompressibleDGSolverBase::build_neighbor_connectivity() {
+    NeighborConnectivityResult result = dgfem::build_neighbor_connectivity(mesh_);
+    neighbor_connectivity_ = std::move(result.connectivity);
+    element_dx_ = std::move(result.element_dx);
 }
 
 double CompressibleDGSolverBase::compute_max_cfl(const StateVector& u_coeffs, double dt) const {

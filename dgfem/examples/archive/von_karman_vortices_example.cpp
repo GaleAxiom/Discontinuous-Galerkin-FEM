@@ -156,7 +156,7 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < solution_frames.size(); ++i) {
             auto filename = (output_dir / ("von_karman_frame_" + std::to_string(i))).string();
             dgfem::VTKWriter::write_euler_solution(mesh, solution_frames[i], filename, gamma,
-                                                   /*refinement=*/1);
+                                                   /*refinement=*/1, /*n_vars=*/4);
             if (i % 5 == 0 || i == solution_frames.size() - 1) {
                 std::cout << "  Frame " << i << "/" << solution_frames.size() - 1 << std::endl;
             }

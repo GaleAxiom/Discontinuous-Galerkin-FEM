@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < solutions.size(); ++i) {
             auto filename = (output_dir / ("couette_flow_" + std::to_string(i))).string();
             dgfem::VTKWriter::write_euler_solution(mesh, solutions[i], filename, gamma,
-                                                   /*refinement=*/1);
+                                                   /*refinement=*/1, /*n_vars=*/4);
             if (i % 5 == 0 || i == solutions.size() - 1) {
                 std::cout << "  Frame " << i << "/" << solutions.size() - 1 << std::endl;
             }

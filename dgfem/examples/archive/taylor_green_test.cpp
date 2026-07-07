@@ -137,7 +137,7 @@ int main(int argc, char** argv) {
         std::cout << "\n--- Exporting " << solutions.size() << " frames ---" << std::endl;
         for (size_t i = 0; i < solutions.size(); ++i) {
             dgfem::VTKWriter::write_euler_solution(
-                mesh, solutions[i], "../../output/taylor_green_" + std::to_string(i), gamma, 2);
+                mesh, solutions[i], "../../output/taylor_green_" + std::to_string(i), gamma, 2, /*n_vars=*/4);
             if (i % 5 == 0 || i == solutions.size() - 1)
                 std::cout << "  Frame " << i << std::endl;
         }

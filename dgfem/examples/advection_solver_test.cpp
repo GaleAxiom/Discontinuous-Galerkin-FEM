@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
         std::cout << "=== DGFEM Advection Solver Test ===" << std::endl;
 
         // Create mesh (triangles, order 2, spacing 0.01, 1 variable, domain [0,1]x[0,1])
-        auto mesh = dgfem::MeshSetup::create_standard_mesh(true, 2, 0.01, 1, 0.0, 1.0, 0.0, 1.0);
+        auto mesh = dgfem::MeshSetup::create_standard_mesh(true, 1, 0.01, 1, 0.0, 1.0, 0.0, 1.0);
         dgfem::MeshSetup::print_info(mesh);
 
         // Advection velocity (diagonal flow)
@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
         dgfem::AdvectionDGSolver solver(mesh, velocity);
         auto solutions = solver.solve(initial_condition, T_final, dt, bc_zero, save_every);
 
-        auto to_dview = [](const Teuchos::RCP<dgfem::TpetraMultiVector>& v) {
+        auto to_dview = [](const Teuchos::RCP<const dgfem::TpetraMultiVector>& v) {
             auto view = v->getLocalViewHost(Tpetra::Access::ReadOnly);
             dgfem::DView1 out("frame", v->getLocalLength());
             for (size_t i = 0; i < v->getLocalLength(); ++i) {
@@ -71,9 +71,9 @@ int main(int argc, char** argv) {
         // Export and validate
         std::cout << "\n--- Exporting " << solutions.size() << " frames ---" << std::endl;
         for (size_t i = 0; i < solutions.size(); ++i) {
-            dgfem::VTKWriter::write_solution(mesh, to_dview(solutions[i]),
-                                             "../../output/advection_solution_" +
-                                                 std::to_string(i));
+            dgfem::VTKWriter::write_advection_solution(mesh, to_dview(solutions[i]),
+                                             "output/advection_solution_" +
+                                                 std::to_string(i) , /*refinement=*/1, /*n_vars=*/1);
             if (i % 5 == 0 || i == solutions.size() - 1)
                 std::cout << "  Frame " << i << std::endl;
         }

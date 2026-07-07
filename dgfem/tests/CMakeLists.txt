@@ -26,6 +26,14 @@ add_executable(dgfem_tests
     solver/navier_stokes_weak_formulation_test.cpp
     solver/shear_flow_accuracy_test.cpp
     solver/compressible_blasius_accuracy_test.cpp
+    solver/neighbor_connectivity_test.cpp
+    solver/euler_eigensystem_test.cpp
+    solver/basis_mode_map_test.cpp
+    solver/troubled_cell_indicator_test.cpp
+    solver/reconstruction_technique_test.cpp
+    solver/compressible_dg_solver_limiter_test.cpp
+    solver/sod_shock_tube_test.cpp
+    solver/smooth_advection_limiter_test.cpp
     boundary/boundary_conditions_test.cpp
     utils/mesh_creation_test.cpp
     utils/vtk_writer_test.cpp

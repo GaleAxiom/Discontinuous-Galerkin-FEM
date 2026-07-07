@@ -514,7 +514,7 @@ int main(int argc, char** argv) {
             for (size_t i = 0; i < solutions.size(); ++i) {
                 std::string filename =
                     "../../output/acoustic_" + resolution_name + "_" + std::to_string(i);
-                dgfem::VTKWriter::write_euler_solution(mesh, solutions[i], filename, gamma, 2);
+                dgfem::VTKWriter::write_euler_solution(mesh, solutions[i], filename, gamma, 2, /*n_vars=*/4);
             }
 
             std::cout << "\n  ✓ Exported " << solutions.size() << " VTK frames" << std::endl;

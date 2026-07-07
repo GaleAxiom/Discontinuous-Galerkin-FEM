@@ -20,6 +20,9 @@
 #include <vector>
 
 #include "assembler.hpp"
+#include "dgfem/solver/neighbor_connectivity.hpp"
+#include "dgfem/solver/reconstruction_technique_base.hpp"
+#include "dgfem/solver/troubled_cell_indicator_base.hpp"
 #include "trilinos_types.hpp"
 #include "weak_form.hpp"
 
@@ -243,17 +246,50 @@ public:
     [[nodiscard]] bool has_diverged() const noexcept { return diverged_; }
 
     /**
-     * @brief Enable/disable the minmod (TVB) slope limiter, applied after every RK stage.
+     * @brief Enable/disable the troubled-cell-indicator + reconstruction-technique limiter,
+     * applied after every RK stage.
      *
-     * Scoped narrowly on purpose: it only supports order-1 quad elements (the Legendre
-     * tensor basis's mode 1 is exactly the x-linear coefficient and mode 3 is exactly the xy
-     * cross term at that order -- see apply_minmod_limiter_x()'s doc comment for why this
-     * doesn't generalize to other orders without more work) and limits in x only. That's
-     * enough for a quasi-1D shock-tube-style problem; a general 2D/any-order limiter is a
-     * separate, larger undertaking. Throws std::invalid_argument if the mesh/basis don't
-     * match when enabling.
+     * Scoped narrowly on purpose: it only supports order-1 quad elements (Order1QuadBasisMap's
+     * mode 1 is exactly the x-linear coefficient and mode 3 is exactly the xy cross term at
+     * that order) and limits in x only. That's enough for a quasi-1D shock-tube-style problem;
+     * a general 2D/any-order limiter is a separate, larger undertaking. Throws
+     * std::invalid_argument if the mesh/basis don't match when enabling.
+     *
+     * If set_reconstruction_technique() was never called, enabling lazily defaults to
+     * {PerssonPeraireIndicator, WenoReconstruction} -- the literature-preferred combination
+     * that replaced this project's original always-on characteristic-variable minmod (kept
+     * available as MinmodReconstruction, paired with AlwaysTroubledIndicator, for
+     * regression-comparison purposes; plain/TVB minmod was measured to make the Sod shock
+     * tube test *less* accurate than no limiter at all -- see sod_shock_tube_test.cpp).
+     *
+     * Honest characterization of what this actually buys you (measured, not assumed -- see
+     * sod_shock_tube_test.cpp and smooth_advection_limiter_test.cpp):
+     *   - On a mild, already-well-resolved problem (the standard Sod shock tube), indicator+WENO
+     *     does NOT beat plain unlimited on raw L2/max error -- unlimited is already quite
+     *     accurate there. It DOES substantially suppress the unphysical density overshoot
+     *     unlimited produces (Gibbs oscillation past the exact solution's true bounds), and it
+     *     recovers most of the accuracy old always-on minmod loses.
+     *   - Isolated from the indicator (forcing reconstruction onto every cell via
+     *     AlwaysTroubledIndicator on a smooth advected density profile), WENO's smoothness-
+     *     weighted blend measurably preserves a smooth extremum better than plain minmod, which
+     *     has a hard cutoff at any local max/min regardless of how smooth the data actually is.
+     *   - The scenario where this stops being a marginal accuracy question and becomes load-
+     *     bearing: a genuinely demanding problem (Toro's "123" double-rarefaction near-vacuum
+     *     test on a coarse mesh) where the unlimited solver produces non-finite output outright,
+     *     while indicator+WENO survives and stays reasonably close to the exact solution. That
+     *     is this limiter's real purpose -- robustness on hard problems, not a free accuracy win
+     *     on easy ones.
      */
     void set_limiter_enabled(bool enabled);
+
+    /**
+     * @brief Inject the troubled-cell indicator + reconstruction technique pair used once the
+     * limiter is enabled. Must be called (if at all) BEFORE set_limiter_enabled(true); if
+     * never called, set_limiter_enabled(true) lazily default-constructs
+     * {PerssonPeraireIndicator, WenoReconstruction} sized to this solver's actual n_vars.
+     */
+    void set_reconstruction_technique(std::shared_ptr<TroubledCellIndicator> indicator,
+                                      std::shared_ptr<ReconstructionTechnique> technique);
 
 protected:
     CompressibleDGSolverBase(std::shared_ptr<DGMesh> mesh,
@@ -282,12 +318,12 @@ private:
     bool diverged_{false};
 
     bool limiter_enabled_{false};
-    std::vector<int> x_left_neighbor_;
-    std::vector<int> x_right_neighbor_;
+    NeighborConnectivity neighbor_connectivity_;
     std::vector<double> element_dx_;
+    std::shared_ptr<TroubledCellIndicator> troubled_cell_indicator_;
+    std::shared_ptr<ReconstructionTechnique> reconstruction_technique_;
 
-    void build_x_neighbor_map();
-    [[nodiscard]] StateVector apply_minmod_limiter_x(const StateVector& u) const;
+    void build_neighbor_connectivity();
 
     [[nodiscard]] std::vector<DView2> flatten_frames(const std::vector<StateVector>& frames) const;
 };
